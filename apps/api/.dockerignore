@@ -5,5 +5,4 @@ venv
 *.pyc
 *.pyo
 .env
-tests/
 http/

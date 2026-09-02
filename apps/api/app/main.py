@@ -8,12 +8,15 @@ from app.audit.model import AuditEvent  # noqa: F401
 from app.bank.model import BankTransferPayment  # noqa: F401
 from app.bank.router import router as bank_router
 from app.batch.model import Batch, IngestionRecord  # noqa: F401
+from app.batch.router import router as batch_router
 from app.common.base import Base
 from app.common.code_sequence import CodeSequence  # noqa: F401
 from app.currency.model import Currency  # noqa: F401
 from app.database import engine
+from app.demo.router import router as demo_router
 from app.evaluation.model import EvaluationCase, GroundTruthLink  # noqa: F401
 from app.ledger.model import LedgerEntry  # noqa: F401
+from app.ledger.router import router as ledger_router
 from app.merchant.model import Merchant  # noqa: F401
 from app.payment.model import Payment  # noqa: F401
 from app.payment.router import router as payment_router
@@ -66,6 +69,9 @@ app.include_router(payment_router)
 app.include_router(stripe_router)
 app.include_router(paypal_router)
 app.include_router(bank_router)
+app.include_router(batch_router)
+app.include_router(demo_router)
+app.include_router(ledger_router)
 app.include_router(reconciliation_router)
 app.include_router(ask_router)
 

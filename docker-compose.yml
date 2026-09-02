@@ -54,8 +54,43 @@ services:
       POSTGRES_DB: ${POSTGRES_DB:-reconciliation}
       POSTGRES_USER: ${POSTGRES_USER:-recon}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-recon_secret}
+      DEMO_MODE: ${DEMO_MODE:-true}
+      DATABASE_URL: ${DATABASE_URL:-}
+      SERVERLESS: ${SERVERLESS:-false}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  api-test:
+    profiles: ["test"]
+    build:
+      context: ./apps/api
+    environment:
+      POSTGRES_HOST: postgres
+      POSTGRES_PORT: 5432
+      POSTGRES_DB: ${POSTGRES_DB:-reconciliation}
+      POSTGRES_USER: ${POSTGRES_USER:-recon}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-recon_secret}
+      DEMO_MODE: ${DEMO_MODE:-true}
+      DATABASE_URL: ${DATABASE_URL:-}
+      SERVERLESS: ${SERVERLESS:-false}
+      RAZORPAY_KEY_ID: ${RAZORPAY_KEY_ID:-}
+      RAZORPAY_KEY_SECRET: ${RAZORPAY_KEY_SECRET:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-2.5-flash}
+      GROQ_MODEL: ${GROQ_MODEL:-llama-3.3-70b-versatile}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
+    command: ["python", "-m", "pytest", "-q"]
     depends_on:
       postgres:
         condition: service_healthy
