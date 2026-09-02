@@ -18,7 +18,11 @@ from app.demo.dataset import (
     SettlementLineSeed,
     SettlementSeed,
 )
-from app.reconciliation.engine import reconcile_stage_a, reconcile_stage_b
+from app.reconciliation.engine import (
+    _amount_window,
+    reconcile_stage_a,
+    reconcile_stage_b,
+)
 from app.reconciliation.model import ScoredCandidate
 from app.reconciliation.policy import can_auto_resolve
 from app.reconciliation.schema import EngineOutcomeSchema
@@ -263,6 +267,129 @@ def test_stage_a_refund_evidence_preserves_refund_reference():
     )
 
 
+def test_stage_a_exact_chain_evidence_identifies_matching_provider_identifier():
+    outcomes = reconcile_stage_a(
+        [ledger(reference="PAY-EXACT")],
+        [],
+        [payment(provider_payment_id="PAY-EXACT", receipt="RECEIPT-ORIGINAL")],
+        [],
+    )
+
+    reference_evidence = next(
+        item for item in outcomes[0].evidence if item.rule_code == "REFERENCE"
+    )
+    assert reference_evidence.observed_values["matched_provider_identifier"] == "PAY-EXACT"
+    assert (
+        reference_evidence.observed_values["normalized_matched_provider_identifier"]
+        == "PAYEXACT"
+    )
+
+
+def test_stage_a_does_not_reuse_provider_payment_across_ledger_entries():
+    shared_payment = payment()
+
+    outcomes = reconcile_stage_a(
+        [ledger("first"), ledger("second")],
+        [order()],
+        [shared_payment],
+        [],
+    )
+
+    assert outcomes[0].status is ResultStatus.matched
+    assert outcomes[0].autonomous is True
+    assert outcomes[1].status is ResultStatus.duplicate
+    assert outcomes[1].autonomous is False
+    assert any(item.rule_code == "BATCH_COLLISION" for item in outcomes[1].evidence)
+
+
+def test_stage_a_does_not_reuse_provider_refund_across_ledger_entries():
+    outcomes = reconcile_stage_a(
+        [
+            ledger(
+                "first",
+                reference="RFND-ONE",
+                amount=2_000,
+                entry_type=LedgerEntryType.refund,
+                business_at=NOW + timedelta(days=1),
+            ),
+            ledger(
+                "second",
+                reference="RFND-ONE",
+                amount=2_000,
+                entry_type=LedgerEntryType.refund,
+                business_at=NOW + timedelta(days=1),
+            ),
+        ],
+        [order()],
+        [payment()],
+        [refund()],
+    )
+
+    assert outcomes[0].status is ResultStatus.matched
+    assert outcomes[0].autonomous is True
+    assert outcomes[1].status is ResultStatus.duplicate
+    assert outcomes[1].autonomous is False
+
+
+def test_stage_a_collision_does_not_suppress_unused_alternative():
+    shared = payment(
+        "shared",
+        provider_payment_id="PAY-SHARED",
+        receipt="SHARED-RECEIPT",
+    )
+    alternative = payment(
+        "alternative",
+        provider_payment_id="PAY-ALTERNATIVE",
+        receipt="ALTERNATIVE-RECEIPT",
+    )
+
+    outcomes = reconcile_stage_a(
+        [
+            ledger("first", reference="PAY-SHARED"),
+            ledger("second", reference="PAY-ALTERNATIVE"),
+        ],
+        [order()],
+        [shared, alternative],
+        [],
+    )
+
+    assert outcomes[0].selected_ids == [str(shared.id)]
+    assert outcomes[0].autonomous is True
+    assert outcomes[1].status is ResultStatus.matched
+    assert outcomes[1].selected_ids == [str(alternative.id)]
+    assert outcomes[1].autonomous is True
+
+
+def test_stage_a_ambiguous_result_does_not_reserve_provisional_provider_id():
+    ambiguous = payment(
+        "ambiguous",
+        provider_payment_id="PAY-AMBIGUOUS",
+        receipt="RCPT-001",
+        business_at=NOW + timedelta(days=2),
+    )
+    runner_up = payment(
+        "runner-up",
+        provider_order_id="order_runner",
+        receipt="RCPT-0012",
+    )
+
+    outcomes = reconcile_stage_a(
+        [
+            ledger("ambiguous", reference="RCPT-001"),
+            ledger("after-ambiguous", reference="PAY-AMBIGUOUS"),
+        ],
+        [order()],
+        [ambiguous, runner_up],
+        [],
+    )
+
+    assert outcomes[0].status is ResultStatus.ambiguous
+    assert outcomes[0].autonomous is False
+    assert outcomes[1].status is ResultStatus.matched
+    assert outcomes[1].selected_ids == [str(ambiguous.id)]
+    assert outcomes[1].autonomous is True
+
+
 def test_exact_identifier_does_not_bypass_currency_contradiction():
     outcomes = reconcile_stage_a(
         [ledger(currency="INR")],
@@ -341,23 +468,29 @@ def test_stage_a_does_not_link_or_consume_low_evidence_candidate():
     assert outcomes[1].status is ResultStatus.missing_ledger
 
 
-def test_stage_a_keeps_numeric_reference_candidate_for_amount_contradiction():
+def test_stage_a_excludes_numeric_reference_candidate_outside_amount_bound():
     mismatched = payment(
         "mismatched",
         receipt="CHECKOUT-100",
         amount=10_500,
     )
 
-    outcome = reconcile_stage_a(
+    outcomes = reconcile_stage_a(
         [ledger(reference="INV-100", amount=10_000)],
         [],
         [mismatched],
         [],
-    )[0]
+    )
 
-    assert outcome.status is ResultStatus.amount_mismatch
-    assert outcome.candidates[0].candidate_id == str(mismatched.id)
-    assert "amount_contradiction" in outcome.candidates[0].contradictions
+    assert outcomes[0].status is ResultStatus.missing_razorpay
+    assert outcomes[0].selected_ids == []
+    assert outcomes[1].status is ResultStatus.missing_ledger
+
+
+def test_stage_a_amount_window_uses_integer_half_percent_rounding():
+    amount = 9_276_516_075_116_799
+
+    assert _amount_window(amount, amount) == amount * 5 // 1_000
 
 
 @pytest.mark.parametrize(
@@ -419,6 +552,138 @@ def test_stage_b_verifies_fee_gst_arithmetic_and_bank_credit():
     assert outcomes[0].autonomous is True
     assert any(item.rule_code == "SETTLEMENT_MATH" for item in outcomes[0].evidence)
     assert any(item.rule_code == "BANK_UTR" for item in outcomes[0].evidence)
+
+
+def test_stage_b_does_not_reuse_settlement_or_bank_credit_across_payments():
+    first_payment = payment("first", amount=6_000)
+    second_payment = payment("second", amount=4_000)
+    current_settlement = settlement()
+    lines = [
+        line(
+            "payment-first",
+            current_settlement.id,
+            SettlementLineType.payment,
+            "pay_first",
+            6_000,
+        ),
+        line(
+            "payment-second",
+            current_settlement.id,
+            SettlementLineType.payment,
+            "pay_second",
+            4_000,
+        ),
+        line("fee", current_settlement.id, SettlementLineType.fee, "FEE-001", -200),
+        line("tax", current_settlement.id, SettlementLineType.tax, "GST-001", -36),
+    ]
+
+    outcomes = reconcile_stage_b(
+        [first_payment, second_payment],
+        [],
+        [current_settlement],
+        lines,
+        [credit("one", current_settlement.id, utr="UTR-one", amount=9_764)],
+    )
+
+    assert outcomes[0].status is ResultStatus.matched
+    assert outcomes[0].autonomous is True
+    assert outcomes[1].status is ResultStatus.duplicate
+    assert outcomes[1].autonomous is False
+    assert any(item.rule_code == "BATCH_COLLISION" for item in outcomes[1].evidence)
+
+
+def test_stage_b_collision_does_not_suppress_unused_alternative():
+    first_payment = payment("first", provider_payment_id="pay_first", amount=6_000)
+    second_payment = payment("second", provider_payment_id="pay_second", amount=4_000)
+    shared = settlement("shared", amount=9_764, utr="UTR-shared")
+    alternative = settlement(
+        "alternative",
+        amount=4_000,
+        fee=0,
+        tax=0,
+        utr="UTR-alternative",
+    )
+    lines = [
+        line("shared-first", shared.id, SettlementLineType.payment, "pay_first", 6_000),
+        line("shared-second", shared.id, SettlementLineType.payment, "pay_second", 4_000),
+        line("shared-fee", shared.id, SettlementLineType.fee, "FEE-shared", -200),
+        line("shared-tax", shared.id, SettlementLineType.tax, "GST-shared", -36),
+        line(
+            "alternative-second",
+            alternative.id,
+            SettlementLineType.payment,
+            "pay_second",
+            4_000,
+        ),
+    ]
+
+    outcomes = reconcile_stage_b(
+        [first_payment, second_payment],
+        [],
+        [shared, alternative],
+        lines,
+        [
+            credit("shared", shared.id, utr="UTR-shared", amount=9_764),
+            credit(
+                "alternative",
+                alternative.id,
+                utr="UTR-alternative-fallback",
+                amount=4_000,
+            ),
+        ],
+    )
+
+    assert outcomes[0].selected_ids == [str(shared.id), str(ident("credit-shared"))]
+    assert outcomes[0].autonomous is True
+    assert outcomes[1].status is ResultStatus.matched
+    assert str(alternative.id) in outcomes[1].selected_ids
+    assert str(shared.id) not in outcomes[1].selected_ids
+    assert outcomes[1].autonomous is False
+
+
+def test_stage_b_ambiguous_result_does_not_reserve_provisional_settlement_or_bank_ids():
+    ambiguous_payment = payment("ambiguous", provider_payment_id="pay_ambiguous")
+    after_payment = payment("after", provider_payment_id="pay_after")
+    provisional = settlement("a", amount=19_764, utr="UTR-a")
+    runner_up = settlement("b", amount=9_764, utr="UTR-b")
+    lines = [
+        line(
+            "a-ambiguous",
+            provisional.id,
+            SettlementLineType.payment,
+            "pay_ambiguous",
+            10_000,
+        ),
+        line("a-after", provisional.id, SettlementLineType.payment, "pay_after", 10_000),
+        line("a-fee", provisional.id, SettlementLineType.fee, "FEE-a", -200),
+        line("a-tax", provisional.id, SettlementLineType.tax, "GST-a", -36),
+        line(
+            "b-ambiguous",
+            runner_up.id,
+            SettlementLineType.payment,
+            "pay_ambiguous",
+            10_000,
+        ),
+        line("b-fee", runner_up.id, SettlementLineType.fee, "FEE-b", -200),
+        line("b-tax", runner_up.id, SettlementLineType.tax, "GST-b", -36),
+    ]
+
+    outcomes = reconcile_stage_b(
+        [ambiguous_payment, after_payment],
+        [],
+        [provisional, runner_up],
+        lines,
+        [
+            credit("a", provisional.id, utr="UTR-a", amount=19_764),
+            credit("b", runner_up.id, utr="UTR-b", amount=9_764),
+        ],
+    )
+
+    assert outcomes[0].status is ResultStatus.ambiguous
+    assert outcomes[0].autonomous is False
+    assert outcomes[1].status is ResultStatus.matched
+    assert outcomes[1].selected_ids == [str(provisional.id), str(ident("credit-a"))]
+    assert outcomes[1].autonomous is True
 
 
 def test_stage_b_normalizes_payment_line_reference_before_linking():
@@ -559,6 +824,71 @@ def test_stage_b_requires_hold_and_later_release_settlements():
     assert any(item.rule_code == "HOLD_RELEASE" for item in outcome.evidence)
 
 
+def test_stage_b_hold_release_ignores_unrelated_release_lines():
+    current_payment = payment()
+    held = settlement(
+        "held-unrelated",
+        amount=8_764,
+        held_amount=1_000,
+        provider_settlement_id="setl_held-unrelated",
+        utr="UTR-held-unrelated",
+    )
+    release = settlement(
+        "release-unrelated",
+        amount=1_500,
+        fee=0,
+        tax=0,
+        provider_settlement_id="setl_release-unrelated",
+        utr="UTR-release-unrelated",
+        business_at=NOW + timedelta(days=4),
+    )
+    lines = [
+        line("payment", held.id, SettlementLineType.payment, "pay_one", 10_000),
+        line("fee", held.id, SettlementLineType.fee, "FEE-001", -200),
+        line("tax", held.id, SettlementLineType.tax, "GST-001", -36),
+        line("hold", held.id, SettlementLineType.hold, "HOLD-001", -1_000),
+        line(
+            "release-matching",
+            release.id,
+            SettlementLineType.release,
+            "setl_held-unrelated",
+            1_000,
+            business_at=release.business_at,
+        ),
+        line(
+            "release-unrelated",
+            release.id,
+            SettlementLineType.release,
+            "setl-other-held",
+            500,
+            business_at=release.business_at,
+        ),
+    ]
+
+    outcome = reconcile_stage_b(
+        [current_payment],
+        [],
+        [held, release],
+        lines,
+        [
+            credit("held-unrelated", held.id, utr="UTR-held-unrelated", amount=8_764),
+            credit(
+                "release-unrelated",
+                release.id,
+                utr="UTR-release-unrelated",
+                amount=1_500,
+            ),
+        ],
+    )[0]
+
+    assert outcome.status is ResultStatus.matched
+    assert outcome.autonomous is True
+    assert any(
+        item.rule_code == "HOLD_RELEASE" and item.observed_values["released_amount"] == 1_000
+        for item in outcome.evidence
+    )
+
+
 def test_stage_b_keeps_hold_open_without_a_later_release():
     current_payment = payment()
     held = settlement(
@@ -589,6 +919,25 @@ def test_stage_b_keeps_hold_open_without_a_later_release():
         item.rule_code == "HOLD_RELEASE" and item.result == "fail"
         for item in outcome.evidence
     )
+
+
+def test_stage_a_exact_chain_with_close_runner_up_is_not_autonomous():
+    exact_payment = payment("exact", business_at=NOW + timedelta(days=2))
+    runner_up = payment(
+        "runner",
+        provider_order_id="order_runner",
+        receipt="RCPT-0012",
+    )
+
+    outcome = reconcile_stage_a(
+        [ledger()],
+        [order()],
+        [exact_payment, runner_up],
+        [],
+    )[0]
+
+    assert outcome.status is ResultStatus.ambiguous
+    assert outcome.autonomous is False
 
 
 def test_engine_outcome_schema_serializes_without_truth_labels():

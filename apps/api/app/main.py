@@ -23,8 +23,16 @@ from app.payment.router import router as payment_router
 from app.paypal.model import PaypalPayment  # noqa: F401
 from app.paypal.router import router as paypal_router
 from app.provider.model import Provider  # noqa: F401
-from app.reconciliation.model import Reconciliation  # noqa: F401
-from app.reconciliation.router import router as reconciliation_router
+from app.reconciliation.model import (  # noqa: F401
+    MatchLink,
+    ReconciliationException,
+    ReconciliationResult,
+    ReconciliationRun,
+)
+from app.reconciliation.router import (
+    metrics_router,
+    router as reconciliation_router,
+)
 from app.seed.router import router as seed_router
 from app.razorpay.model import (  # noqa: F401
     RazorpayOrder,
@@ -73,6 +81,7 @@ app.include_router(batch_router)
 app.include_router(demo_router)
 app.include_router(ledger_router)
 app.include_router(reconciliation_router)
+app.include_router(metrics_router)
 app.include_router(ask_router)
 
 

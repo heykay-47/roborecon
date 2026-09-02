@@ -1,326 +1,515 @@
-from datetime import datetime, timedelta, timezone
+from dataclasses import asdict, is_dataclass
+from datetime import datetime, timezone
+from enum import Enum
+from time import perf_counter_ns
+from typing import Any
+from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.orm import aliased
 
-from app.bank.model import BankTransferPayment
-from app.common.code_generator import generate_code
-from app.common.enums import ReconciliationStatus
-from app.currency.model import Currency
-from app.merchant.model import Merchant
-from app.payment.model import Payment
-from app.paypal.model import PaypalPayment
-from app.reconciliation.engine import (
-    CONFIDENCE_THRESHOLD,
-    InternalPayment,
-    MatchCandidate,
-    score_match,
+from app.audit.model import AuditEvent
+from app.batch.model import Batch, IngestionRecord
+from app.common.enums import AuditEventType, ExceptionStatus, RunStatus
+from app.demo.dataset import (
+    BankCreditSeed,
+    LedgerEntrySeed,
+    RazorpayOrderSeed,
+    RazorpayPaymentSeed,
+    RazorpayRefundSeed,
+    SettlementLineSeed,
+    SettlementSeed,
 )
-from app.reconciliation.model import Reconciliation
-from app.stripe.model import StripePayment
+from app.ledger.model import LedgerEntry
+from app.razorpay.model import RazorpayOrder, RazorpayPayment, RazorpayRefund
+from app.reconciliation.engine import reconcile_stage_a, reconcile_stage_b
+from app.reconciliation.model import (
+    EngineOutcome,
+    MatchLink,
+    ReconciliationException,
+    ReconciliationResult,
+    ReconciliationRun,
+)
+from app.settlement.model import BankCredit, Settlement, SettlementLine
 
 
-async def _build_candidates(session: AsyncSession) -> list[MatchCandidate]:
-    """Load all provider payments that haven't been reconciled yet."""
-    candidates = []
-
-    # Stripe: LEFT JOIN reconciliations to find unreconciled
-    rec_s = aliased(Reconciliation)
-    stripe_result = await session.execute(
-        select(StripePayment)
-        .outerjoin(rec_s, StripePayment.id == rec_s.stripe_payment_id)
-        .where(rec_s.id.is_(None))
-    )
-    for sp in stripe_result.scalars().all():
-        candidates.append(MatchCandidate(
-            provider_type="stripe",
-            provider_record_id=str(sp.id),
-            amount=sp.amount,
-            currency=sp.currency,
-            card_bin=sp.card_bin,
-            card_last4=sp.card_last4,
-            iban_country=None,
-            iban_last_four=None,
-            vat_number=sp.vat_number,
-            provider_date=sp.stripe_created_at,
-        ))
-
-    # PayPal: LEFT JOIN reconciliations to find unreconciled
-    rec_p = aliased(Reconciliation)
-    paypal_result = await session.execute(
-        select(PaypalPayment)
-        .outerjoin(rec_p, PaypalPayment.id == rec_p.paypal_payment_id)
-        .where(rec_p.id.is_(None))
-    )
-    for pp in paypal_result.scalars().all():
-        candidates.append(MatchCandidate(
-            provider_type="paypal",
-            provider_record_id=str(pp.id),
-            amount=pp.amount,
-            currency=pp.currency,
-            card_bin=pp.card_bin,
-            card_last4=pp.card_last4,
-            iban_country=None,
-            iban_last_four=None,
-            vat_number=pp.vat_number,
-            provider_date=pp.paypal_created_at,
-        ))
-
-    # Bank: LEFT JOIN reconciliations to find unreconciled
-    rec_b = aliased(Reconciliation)
-    bank_result = await session.execute(
-        select(BankTransferPayment)
-        .outerjoin(rec_b, BankTransferPayment.id == rec_b.bank_transfer_id)
-        .where(rec_b.id.is_(None))
-    )
-    for bp in bank_result.scalars().all():
-        candidates.append(MatchCandidate(
-            provider_type="bank",
-            provider_record_id=str(bp.id),
-            amount=bp.amount,
-            currency=bp.currency,
-            card_bin=None,
-            card_last4=None,
-            iban_country=bp.iban_country,
-            iban_last_four=bp.iban_last_four,
-            vat_number=bp.vat_number,
-            provider_date=bp.bank_created_at,
-        ))
-
-    return candidates
+class RunAlreadyRunning(RuntimeError):
+    """Raised when a batch already has an active deterministic run."""
 
 
-async def _build_internal_payments(
+def _jsonable(value: Any) -> Any:
+    if is_dataclass(value):
+        return _jsonable(asdict(value))
+    if isinstance(value, Enum):
+        return value.value
+    if isinstance(value, UUID):
+        return str(value)
+    if isinstance(value, dict):
+        return {str(key): _jsonable(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_jsonable(item) for item in value]
+    return value
+
+
+def _source_counts(
+    ledger: list[LedgerEntry],
+    orders: list[RazorpayOrder],
+    payments: list[RazorpayPayment],
+    refunds: list[RazorpayRefund],
+    settlements: list[Settlement],
+    credits: list[BankCredit],
+    quarantine: list[IngestionRecord],
+) -> dict[str, int]:
+    counts = {
+        "ledger": len(ledger),
+        "razorpayOrders": len(orders),
+        "razorpayPayments": len(payments),
+        "razorpayRefunds": len(refunds),
+        "settlements": len(settlements),
+        "bankCredits": len(credits),
+        "quarantined": len(quarantine),
+    }
+    counts["total"] = sum(counts.values())
+    return counts
+
+
+async def _load_snapshot(
     session: AsyncSession,
-) -> list[InternalPayment]:
-    """Load all internal payments with their merchant's VAT number."""
-    currencies = (await session.execute(select(Currency))).scalars().all()
-    currency_map = {c.id: c for c in currencies}
+    batch_id: UUID,
+) -> tuple[Batch, dict[str, list[Any]], dict[str, int]]:
+    batch = await session.get(Batch, batch_id)
+    if batch is None:
+        raise ValueError("Reconciliation batch was not found")
 
-    merchants = (await session.execute(select(Merchant))).scalars().all()
-    merchant_map = {m.id: m for m in merchants}
-
-    payments_result = await session.execute(select(Payment))
-    payments = payments_result.scalars().all()
-
-    return [
-        InternalPayment(
-            payment_id=str(p.id),
-            amount=p.amount,
-            fee=p.fee,
-            net=p.net,
-            currency_id=str(p.currency_id),
-            currency_code=currency_map[p.currency_id].code,
-            card_bin=p.card_bin,
-            card_last_four=p.card_last_four,
-            iban_country=p.iban_country,
-            iban_last_four=p.iban_last_four,
-            vat_number=merchant_map[p.merchant_id].vat_number,
-            processed_at=p.processed_at,
+    async def load(model: Any) -> list[Any]:
+        result = await session.execute(
+            select(model).where(model.batch_id == batch_id).order_by(model.id)
         )
-        for p in payments
-    ]
+        return list(result.scalars().all())
 
-
-def _determine_status(
-    amount_match_type: str,
-) -> ReconciliationStatus:
-    """Determine reconciliation status from the amount match type."""
-    if amount_match_type == "exact":
-        return ReconciliationStatus.matched
-    elif amount_match_type == "after_fee":
-        return ReconciliationStatus.matched_with_fee
-    else:
-        return ReconciliationStatus.amount_mismatch
-
-
-async def run_reconciliation(session: AsyncSession) -> dict:
-    """
-    Run the full reconciliation process:
-    1. Load unreconciled provider payments (candidates)
-    2. Load internal payments
-    3. Score each candidate against all internal payments
-    4. Create reconciliation records for matches, mismatches, and missing_internal
-    5. Count missing_external (informational only — no records created,
-       so they can be matched in future runs when provider data arrives)
-    """
-
-    candidates = await _build_candidates(session)
-    internal_payments = await _build_internal_payments(session)
-
-    # Track which internal payments have been matched in this run
-    matched_payment_ids: set[str] = set()
-    # Track already reconciled payment IDs (from previous runs)
-    existing_rec = await session.execute(
-        select(Reconciliation.payment_id).where(
-            Reconciliation.payment_id.is_not(None)
-        )
+    source_rows = {
+        "ledger": await load(LedgerEntry),
+        "orders": await load(RazorpayOrder),
+        "payments": await load(RazorpayPayment),
+        "refunds": await load(RazorpayRefund),
+        "settlements": await load(Settlement),
+        "lines": await load(SettlementLine),
+        "credits": await load(BankCredit),
+        "quarantine": await load(IngestionRecord),
+    }
+    counts = _source_counts(
+        source_rows["ledger"],
+        source_rows["orders"],
+        source_rows["payments"],
+        source_rows["refunds"],
+        source_rows["settlements"],
+        source_rows["credits"],
+        source_rows["quarantine"],
     )
-    already_reconciled = {str(row[0]) for row in existing_rec.all()}
+    return batch, source_rows, counts
 
-    results = {
-        "matched": 0,
-        "matched_with_fee": 0,
-        "amount_mismatch": 0,
-        "missing_internal": 0,
-        "missing_external": 0,
-        "duplicate": 0,
-        "total_processed": 0,
+
+def _seed_sources(source_rows: dict[str, list[Any]]) -> dict[str, list[Any]]:
+    return {
+        "ledger": [
+            LedgerEntrySeed(
+                id=row.id,
+                reference=row.reference,
+                entry_type=row.entry_type,
+                amount=row.amount,
+                currency=row.currency,
+                business_at=row.business_at,
+            )
+            for row in source_rows["ledger"]
+        ],
+        "orders": [
+            RazorpayOrderSeed(
+                id=row.id,
+                provider_order_id=row.provider_order_id,
+                receipt=row.receipt,
+                amount=row.amount,
+                currency=row.currency,
+                status=row.status,
+                business_at=row.business_at,
+            )
+            for row in source_rows["orders"]
+        ],
+        "payments": [
+            RazorpayPaymentSeed(
+                id=row.id,
+                provider_payment_id=row.provider_payment_id,
+                provider_order_id=row.provider_order_id,
+                receipt=row.receipt,
+                amount=row.amount,
+                currency=row.currency,
+                status=row.status,
+                captured=row.captured,
+                business_at=row.business_at,
+            )
+            for row in source_rows["payments"]
+        ],
+        "refunds": [
+            RazorpayRefundSeed(
+                id=row.id,
+                provider_refund_id=row.provider_refund_id,
+                provider_payment_id=row.provider_payment_id,
+                amount=row.amount,
+                currency=row.currency,
+                status=row.status,
+                business_at=row.business_at,
+            )
+            for row in source_rows["refunds"]
+        ],
+        "settlements": [
+            SettlementSeed(
+                id=row.id,
+                provider_settlement_id=row.provider_settlement_id,
+                amount=row.amount,
+                fee=row.fee,
+                tax=row.tax,
+                held_amount=row.held_amount,
+                currency=row.currency,
+                utr=row.utr,
+                status=row.status,
+                business_at=row.business_at,
+            )
+            for row in source_rows["settlements"]
+        ],
+        "lines": [
+            SettlementLineSeed(
+                id=row.id,
+                settlement_id=row.settlement_id,
+                line_type=row.line_type,
+                reference=row.reference,
+                amount=row.amount,
+                currency=row.currency,
+                business_at=row.business_at,
+            )
+            for row in source_rows["lines"]
+        ],
+        "credits": [
+            BankCreditSeed(
+                id=row.id,
+                settlement_id=row.settlement_id,
+                utr=row.utr,
+                amount=row.amount,
+                currency=row.currency,
+                business_at=row.business_at,
+            )
+            for row in source_rows["credits"]
+        ],
     }
 
-    now = datetime.now(timezone.utc)
 
-    # --- Match each candidate (provider payment) against internal payments ---
-    for candidate in candidates:
-        best_result = None
-        matches_above_threshold = []
+def _source_index(source_rows: dict[str, list[Any]]) -> dict[str, tuple[str, Any]]:
+    index: dict[str, tuple[str, Any]] = {}
+    for source_type, rows in (
+        ("ledger", source_rows["ledger"]),
+        ("razorpay_order", source_rows["orders"]),
+        ("razorpay_payment", source_rows["payments"]),
+        ("razorpay_refund", source_rows["refunds"]),
+        ("settlement", source_rows["settlements"]),
+        ("settlement_line", source_rows["lines"]),
+        ("bank_credit", source_rows["credits"]),
+    ):
+        index.update({str(row.id): (source_type, row) for row in rows})
+    return index
 
-        for payment in internal_payments:
-            # Skip already matched payments
-            if payment.payment_id in matched_payment_ids:
+
+def _outcome_result(
+    *,
+    run: ReconciliationRun,
+    batch_id: UUID,
+    outcome: EngineOutcome,
+    primary_source_type: str,
+    primary_source_id: UUID | None,
+    amount: int | None,
+    currency: str | None,
+) -> ReconciliationResult:
+    return ReconciliationResult(
+        run_id=run.id,
+        batch_id=batch_id,
+        stage=outcome.stage,
+        status=outcome.status,
+        primary_source_type=primary_source_type,
+        primary_source_id=primary_source_id,
+        amount=amount,
+        currency=currency,
+        score=outcome.score,
+        runner_up_score=outcome.runner_up_score,
+        margin=outcome.margin,
+        autonomous=outcome.autonomous,
+        selected_ids=_jsonable(outcome.selected_ids),
+        evidence=_jsonable(outcome.evidence),
+        candidates=_jsonable(outcome.candidates),
+    )
+
+
+def _add_links_and_exception(
+    session: AsyncSession,
+    *,
+    run: ReconciliationRun,
+    result: ReconciliationResult,
+    outcome: EngineOutcome,
+    source_index: dict[str, tuple[str, Any]],
+    batch_id: UUID,
+) -> None:
+    if outcome.autonomous:
+        links: list[tuple[str, UUID, str]] = []
+        if result.primary_source_id is not None:
+            links.append((result.primary_source_type, result.primary_source_id, "primary"))
+        for selected_id in outcome.selected_ids:
+            source = source_index.get(str(selected_id))
+            if source is not None:
+                links.append((source[0], source[1].id, "selected"))
+        seen: set[tuple[str, UUID]] = set()
+        for source_type, source_id, role in links:
+            key = (source_type, source_id)
+            if key in seen:
                 continue
-            if payment.payment_id in already_reconciled:
-                continue
-
-            result = score_match(payment, candidate)
-            if result.confidence >= CONFIDENCE_THRESHOLD:
-                matches_above_threshold.append(result)
-                if best_result is None or result.confidence > best_result.confidence:
-                    best_result = result
-
-        code = await generate_code(session, "REC")
-
-        if len(matches_above_threshold) > 1:
-            # Multiple matches — flag as duplicate
-            matched_payment = _get_internal_payment(
-                best_result, internal_payments
+            seen.add(key)
+            session.add(
+                MatchLink(
+                    run_id=run.id,
+                    result_id=result.id,
+                    source_type=source_type,
+                    source_id=source_id,
+                    role=role,
+                    autonomous=True,
+                    actor="system",
+                )
             )
-            recon = Reconciliation(
-                code=code,
-                status=ReconciliationStatus.duplicate,
-                payment_id=matched_payment.payment_id if matched_payment else None,
-                internal_amount=matched_payment.amount if matched_payment else 0,
-                stripe_payment_id=_provider_id(candidate, "stripe"),
-                paypal_payment_id=_provider_id(candidate, "paypal"),
-                bank_transfer_id=_provider_id(candidate, "bank"),
-                external_amount=candidate.amount,
-                delta=0,
-                currency_id=_find_currency_id_by_code(
-                    candidate.currency, internal_payments
+    else:
+        session.add(
+            ReconciliationException(
+                run_id=run.id,
+                result_id=result.id,
+                batch_id=batch_id,
+                status=ExceptionStatus.open,
+                exception_type=outcome.status.value,
+                source_type=result.primary_source_type,
+                source_id=result.primary_source_id,
+                amount=result.amount,
+                message=(
+                    f"Deterministic outcome requires review: {outcome.status.value}."
                 ),
-                score=best_result.score if best_result else 0,
-                max_score=best_result.max_score if best_result else 0,
-                confidence=best_result.confidence if best_result else 0,
-                reconciled_at=now,
-                reconciled_by="system",
-                notes=f"Multiple matches found ({len(matches_above_threshold)} candidates)",
             )
-            session.add(recon)
-            results["duplicate"] += 1
+        )
 
-        elif best_result is not None:
-            # Single best match
-            matched_payment = _get_internal_payment(
-                best_result, internal_payments
+
+async def _audit(
+    session: AsyncSession,
+    *,
+    batch_id: UUID,
+    event_type: AuditEventType,
+    entity_type: str,
+    entity_id: UUID | None,
+    summary: str,
+) -> None:
+    sequence = (
+        await session.execute(
+            select(func.coalesce(func.max(AuditEvent.sequence), 0)).where(
+                AuditEvent.batch_id == batch_id
             )
-            status = _determine_status(best_result.amount_match_type)
-            delta = candidate.amount - matched_payment.amount
+        )
+    ).scalar_one()
+    session.add(
+        AuditEvent(
+            batch_id=batch_id,
+            event_type=event_type,
+            sequence=int(sequence) + 1,
+            actor="system",
+            entity_type=entity_type,
+            entity_id=entity_id,
+            occurred_at=datetime.now(timezone.utc),
+            summary=summary,
+        )
+    )
 
-            recon = Reconciliation(
-                code=code,
-                status=status,
-                payment_id=matched_payment.payment_id,
-                internal_amount=matched_payment.amount,
-                stripe_payment_id=_provider_id(candidate, "stripe"),
-                paypal_payment_id=_provider_id(candidate, "paypal"),
-                bank_transfer_id=_provider_id(candidate, "bank"),
-                external_amount=candidate.amount,
-                delta=delta,
-                currency_id=matched_payment.currency_id,
-                score=best_result.score,
-                max_score=best_result.max_score,
-                confidence=best_result.confidence,
-                reconciled_at=now,
-                reconciled_by="system",
-                notes=f"Score: {best_result.score}/{best_result.max_score} ({best_result.confidence}%)",  # noqa: E501
+
+async def run_reconciliation(
+    session: AsyncSession,
+    batch_id: UUID,
+) -> ReconciliationRun:
+    """Run both pure deterministic stages against one fixed batch snapshot."""
+    if await session.get(Batch, batch_id) is None:
+        raise ValueError("Reconciliation batch was not found")
+    running = (
+        await session.execute(
+            select(ReconciliationRun).where(
+                ReconciliationRun.batch_id == batch_id,
+                ReconciliationRun.status == RunStatus.running,
             )
-            session.add(recon)
-            matched_payment_ids.add(matched_payment.payment_id)
-            results[status.value] += 1
+        )
+    ).scalar_one_or_none()
+    if running is not None:
+        raise RunAlreadyRunning("A reconciliation run is already running for this batch")
 
-        else:
-            # No match found — provider has a record we don't
-            currency_id = _find_currency_id_by_code(
-                candidate.currency, internal_payments
+    started_at = datetime.now(timezone.utc)
+    run = ReconciliationRun(
+        batch_id=batch_id,
+        status=RunStatus.running,
+        started_at=started_at,
+        source_row_count=0,
+        source_counts={},
+    )
+    session.add(run)
+    try:
+        await session.flush()
+        await _audit(
+            session,
+            batch_id=batch_id,
+            event_type=AuditEventType.run_started,
+            entity_type="reconciliation_run",
+            entity_id=run.id,
+            summary="Reconciliation run started",
+        )
+        await session.commit()
+    except IntegrityError as error:
+        await session.rollback()
+        raise RunAlreadyRunning(
+            "A reconciliation run is already running for this batch"
+        ) from error
+
+    started_ticks = perf_counter_ns()
+    try:
+        batch, source_rows, source_counts = await _load_snapshot(session, batch_id)
+        seeds = _seed_sources(source_rows)
+        source_index = _source_index(source_rows)
+        stage_a_outcomes = reconcile_stage_a(
+            seeds["ledger"],
+            seeds["orders"],
+            seeds["payments"],
+            seeds["refunds"],
+        )
+        stage_b_outcomes = reconcile_stage_b(
+            seeds["payments"],
+            seeds["refunds"],
+            seeds["settlements"],
+            seeds["lines"],
+            seeds["credits"],
+        )
+
+        ledger_rows = source_rows["ledger"]
+        for index, outcome in enumerate(stage_a_outcomes):
+            if index < len(ledger_rows):
+                primary = ledger_rows[index]
+                primary_type = "ledger"
+            else:
+                selected = next(iter(outcome.selected_ids), None)
+                source = source_index.get(str(selected)) if selected else None
+                primary_type = source[0] if source else "source"
+                primary = source[1] if source else None
+            result = _outcome_result(
+                run=run,
+                batch_id=batch.id,
+                outcome=outcome,
+                primary_source_type=primary_type,
+                primary_source_id=primary.id if primary is not None else None,
+                amount=primary.amount if primary is not None else None,
+                currency=primary.currency if primary is not None else None,
             )
-            recon = Reconciliation(
-                code=code,
-                status=ReconciliationStatus.missing_internal,
-                payment_id=None,
-                internal_amount=0,
-                stripe_payment_id=_provider_id(candidate, "stripe"),
-                paypal_payment_id=_provider_id(candidate, "paypal"),
-                bank_transfer_id=_provider_id(candidate, "bank"),
-                external_amount=candidate.amount,
-                delta=candidate.amount,
-                currency_id=currency_id,
-                score=0,
-                max_score=0,
-                confidence=0,
-                reconciled_at=now,
-                reconciled_by="system",
-                notes="No matching internal payment found",
+            session.add(result)
+            await session.flush()
+            _add_links_and_exception(
+                session,
+                run=run,
+                result=result,
+                outcome=outcome,
+                source_index=source_index,
+                batch_id=batch.id,
             )
-            session.add(recon)
-            results["missing_internal"] += 1
 
-        results["total_processed"] += 1
+        captured_payments = [
+            row
+            for row in source_rows["payments"]
+            if row.captured and _jsonable(row.status) == "captured"
+        ]
+        for payment, outcome in zip(captured_payments, stage_b_outcomes):
+            result = _outcome_result(
+                run=run,
+                batch_id=batch.id,
+                outcome=outcome,
+                primary_source_type="razorpay_payment",
+                primary_source_id=payment.id,
+                amount=payment.amount,
+                currency=payment.currency,
+            )
+            session.add(result)
+            await session.flush()
+            _add_links_and_exception(
+                session,
+                run=run,
+                result=result,
+                outcome=outcome,
+                source_index=source_index,
+                batch_id=batch.id,
+            )
 
-    # --- Count missing_external (informational only, no records created) ---
-    cutoff = now - timedelta(hours=1)
-    for payment in internal_payments:
-        if payment.payment_id in matched_payment_ids:
-            continue
-        if payment.payment_id in already_reconciled:
-            continue
-        if payment.processed_at > cutoff:
-            continue
-        results["missing_external"] += 1
+        for row in source_rows["quarantine"]:
+            session.add(
+                ReconciliationException(
+                    run_id=run.id,
+                    result_id=None,
+                    batch_id=batch.id,
+                    status=ExceptionStatus.open,
+                    exception_type="malformed",
+                    source_type="quarantine",
+                    source_id=None,
+                    amount=None,
+                    message="Malformed source row was quarantined before matching.",
+                )
+            )
 
-    await session.commit()
-    return results
-
-
-# --- Helper functions ---
-
-def _provider_id(candidate: MatchCandidate, provider_type: str) -> str | None:
-    """Return the provider record ID only if it matches the provider type."""
-    if candidate.provider_type == provider_type:
-        return candidate.provider_record_id
-    return None
-
-
-def _get_internal_payment(
-    result, internal_payments: list[InternalPayment]
-) -> InternalPayment:
-    """Find the internal payment that produced the best match result."""
-    best_payment = None
-    best_score = -1
-    for payment in internal_payments:
-        r = score_match(payment, result.candidate)
-        if r.score > best_score:
-            best_score = r.score
-            best_payment = payment
-    return best_payment
-
-
-def _find_currency_id_by_code(
-    currency_code: str,
-    internal_payments: list[InternalPayment],
-) -> str:
-    """Find a currency_id by matching the currency code from internal payments."""
-    for p in internal_payments:
-        if p.currency_code == currency_code:
-            return p.currency_id
-    return internal_payments[0].currency_id if internal_payments else ""
+        elapsed_ms = max(0, round((perf_counter_ns() - started_ticks) / 1_000_000))
+        run.status = RunStatus.completed
+        run.completed_at = datetime.now(timezone.utc)
+        run.duration_ms = elapsed_ms
+        run.source_counts = source_counts
+        run.source_row_count = source_counts["total"]
+        run.throughput = (
+            round(source_counts["total"] / (elapsed_ms / 1_000), 2)
+            if elapsed_ms
+            else 0.0
+        )
+        await _audit(
+            session,
+            batch_id=batch.id,
+            event_type=AuditEventType.result_persisted,
+            entity_type="reconciliation_run",
+            entity_id=run.id,
+            summary="Deterministic reconciliation results persisted",
+        )
+        await _audit(
+            session,
+            batch_id=batch.id,
+            event_type=AuditEventType.run_completed,
+            entity_type="reconciliation_run",
+            entity_id=run.id,
+            summary="Reconciliation run completed",
+        )
+        await session.commit()
+        return run
+    except Exception:
+        await session.rollback()
+        failed_run = await session.get(ReconciliationRun, run.id)
+        if failed_run is not None:
+            elapsed_ms = max(0, round((perf_counter_ns() - started_ticks) / 1_000_000))
+            failed_run.status = RunStatus.failed
+            failed_run.completed_at = datetime.now(timezone.utc)
+            failed_run.duration_ms = elapsed_ms
+            failed_run.error_message = "Reconciliation failed before completion."
+            try:
+                await _audit(
+                    session,
+                    batch_id=batch_id,
+                    event_type=AuditEventType.run_failed,
+                    entity_type="reconciliation_run",
+                    entity_id=failed_run.id,
+                    summary="Reconciliation run failed",
+                )
+                await session.commit()
+            except Exception:
+                await session.rollback()
+        raise

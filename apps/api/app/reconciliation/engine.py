@@ -28,7 +28,8 @@ from app.reconciliation.model import (
 from app.reconciliation.policy import can_auto_resolve
 
 STAGE_A_DATE_WINDOW = timedelta(days=7)
-STAGE_A_AMOUNT_TOLERANCE = 0.005
+STAGE_A_AMOUNT_TOLERANCE_NUMERATOR = 5
+STAGE_A_AMOUNT_TOLERANCE_DENOMINATOR = 1_000
 STAGE_A_MINIMUM_SCORE = 65
 STAGE_B_DATE_WINDOW = timedelta(days=7)
 
@@ -161,21 +162,32 @@ def _stage_a_pool(
     return pool
 
 
+def _matching_identifier(
+    entry: LedgerEntrySeed,
+    candidate: _StageACandidate,
+) -> str | None:
+    normalized_entry = normalize_reference(entry.reference)
+    if not normalized_entry:
+        return None
+    for reference in candidate.references:
+        if normalize_reference(reference) == normalized_entry:
+            return reference
+    return None
+
+
 def _is_exact_identifier(
     entry: LedgerEntrySeed,
     candidate: _StageACandidate,
 ) -> bool:
-    normalized_entry = normalize_reference(entry.reference)
-    return bool(normalized_entry) and normalized_entry in {
-        normalize_reference(reference) for reference in candidate.references
-    }
+    return _matching_identifier(entry, candidate) is not None
 
 
 def _amount_window(entry_amount: int, candidate_amount: int) -> int:
-    return max(
-        100,
-        int(max(abs(entry_amount), abs(candidate_amount)) * STAGE_A_AMOUNT_TOLERANCE),
-    )
+    amount_basis = max(abs(entry_amount), abs(candidate_amount))
+    tolerance = (
+        amount_basis * STAGE_A_AMOUNT_TOLERANCE_NUMERATOR
+    ) // STAGE_A_AMOUNT_TOLERANCE_DENOMINATOR
+    return max(100, tolerance)
 
 
 def _reference_similarity(
@@ -229,6 +241,45 @@ def _has_reference_evidence(candidate: ScoredCandidate) -> bool:
     )
 
 
+def _batch_collision_ids(
+    candidate: ScoredCandidate,
+    reserved_ids: set[str],
+    resource_ids: Iterable[str] | None = None,
+) -> list[str]:
+    resources = set(resource_ids or (candidate.candidate_id,))
+    return sorted(reserved_ids.intersection(resources))
+
+
+def _mark_batch_collision(
+    candidate: ScoredCandidate,
+    reserved_ids: set[str],
+    resource_ids: Iterable[str] | None = None,
+) -> ScoredCandidate:
+    collision_ids = _batch_collision_ids(candidate, reserved_ids, resource_ids)
+    if not collision_ids:
+        return candidate
+    return replace(
+        candidate,
+        contradictions=tuple(
+            dict.fromkeys((*candidate.contradictions, "batch_collision"))
+        ),
+        duplicate=True,
+        evidence=(
+            *candidate.evidence,
+            _evidence(
+                "BATCH_COLLISION",
+                {
+                    "candidate_id": candidate.candidate_id,
+                    "consumed_ids": collision_ids,
+                },
+                0,
+                "fail",
+                "A source record was already selected for another batch record.",
+            ),
+        ),
+    )
+
+
 def _amount_compatible(
     entry: LedgerEntrySeed,
     candidate: _StageACandidate,
@@ -254,8 +305,6 @@ def _eligible_stage_a(
         return True
     if candidate.currency != entry.currency:
         return False
-    if _numeric_reference_key(entry, candidate):
-        return _date_distance(entry.business_at, candidate.business_at) <= STAGE_A_DATE_WINDOW
     if not _amount_compatible(entry, candidate):
         return False
     return _date_distance(entry.business_at, candidate.business_at) <= STAGE_A_DATE_WINDOW
@@ -268,7 +317,8 @@ def _stage_a_score(
     evidence: list[CriterionEvidence] = []
     contradictions: list[str] = []
     score = 0
-    exact_identifier = _is_exact_identifier(entry, candidate)
+    matched_identifier = _matching_identifier(entry, candidate)
+    exact_identifier = matched_identifier is not None
     normalized_entry = normalize_reference(entry.reference)
     normalized_reference = normalize_reference(candidate.original_reference)
 
@@ -313,15 +363,25 @@ def _stage_a_score(
             reference_points = 0
             reference_result = "fail"
         reference_explanation = "Reference similarity is bounded and does not establish identity alone."
+    reference_observed_values: dict[str, Any] = {
+        "ledger_reference": entry.reference,
+        "provider_reference": candidate.original_reference,
+        "normalized_ledger_reference": normalized_entry,
+        "normalized_provider_reference": normalized_reference,
+    }
+    if matched_identifier is not None:
+        reference_observed_values.update(
+            {
+                "matched_provider_identifier": matched_identifier,
+                "normalized_matched_provider_identifier": normalize_reference(
+                    matched_identifier
+                ),
+            }
+        )
     evidence.append(
         _evidence(
             "REFERENCE",
-            {
-                "ledger_reference": entry.reference,
-                "provider_reference": candidate.original_reference,
-                "normalized_ledger_reference": normalized_entry,
-                "normalized_provider_reference": normalized_reference,
-            },
+            reference_observed_values,
             reference_points,
             reference_result,
             reference_explanation,
@@ -415,6 +475,7 @@ def _stage_a_score(
 def _outcome_from_stage_a_candidates(
     entry: LedgerEntrySeed,
     candidates: list[ScoredCandidate],
+    reserved_candidate_ids: set[str] | None = None,
 ) -> EngineOutcome:
     if not candidates:
         return EngineOutcome(
@@ -431,8 +492,16 @@ def _outcome_from_stage_a_candidates(
             stage=ReconciliationStage.ledger_to_razorpay,
         )
 
+    reserved_candidate_ids = reserved_candidate_ids or set()
+    selectable_candidates = [
+        candidate
+        for candidate in candidates
+        if candidate.candidate_id not in reserved_candidate_ids
+    ] or candidates
     exact_candidates = [
-        candidate for candidate in candidates if candidate.exact_identifier_chain
+        candidate
+        for candidate in selectable_candidates
+        if candidate.exact_identifier_chain
     ]
     if len(exact_candidates) > 1:
         candidates = [
@@ -441,9 +510,17 @@ def _outcome_from_stage_a_candidates(
             else candidate
             for candidate in candidates
         ]
+        selectable_candidates = [
+            candidate
+            for candidate in candidates
+            if candidate.candidate_id not in reserved_candidate_ids
+        ] or candidates
     candidates.sort(key=lambda candidate: (-candidate.score, candidate.candidate_id))
-    selected = candidates[0]
-    runner_up = candidates[1] if len(candidates) > 1 else None
+    selectable_candidates.sort(
+        key=lambda candidate: (-candidate.score, candidate.candidate_id)
+    )
+    selected = selectable_candidates[0]
+    runner_up = selectable_candidates[1] if len(selectable_candidates) > 1 else None
     runner_up_score = runner_up.score if runner_up is not None else 0
     margin = selected.score - runner_up_score
     if (
@@ -469,7 +546,9 @@ def _outcome_from_stage_a_candidates(
             candidates=candidates,
             stage=ReconciliationStage.ledger_to_razorpay,
         )
-    duplicate_candidates = [candidate for candidate in candidates if candidate.duplicate]
+    duplicate_candidates = [
+        candidate for candidate in selectable_candidates if candidate.duplicate
+    ]
     duplicate = bool(duplicate_candidates) or len(exact_candidates) > 1
     if duplicate:
         status = ResultStatus.duplicate
@@ -480,11 +559,14 @@ def _outcome_from_stage_a_candidates(
     else:
         status = ResultStatus.matched
 
-    autonomous = can_auto_resolve(selected, runner_up)
+    autonomous = (
+        status is not ResultStatus.ambiguous
+        and can_auto_resolve(selected, runner_up)
+    )
     return EngineOutcome(
         status=status,
         selected_ids=(
-            [candidate.candidate_id for candidate in candidates if candidate.duplicate]
+            [candidate.candidate_id for candidate in selectable_candidates if candidate.duplicate]
             if duplicate
             else [selected.candidate_id]
         ),
@@ -508,6 +590,7 @@ def reconcile_stage_a(
     pool = _stage_a_pool(orders, payments, refunds)
     outcomes: list[EngineOutcome] = []
     considered_ids: set[str] = set()
+    reserved_ids: set[str] = set()
 
     for entry in ledger:
         expected_kind = (
@@ -532,6 +615,15 @@ def reconcile_stage_a(
             else scored_candidate
             for scored_candidate, source_candidate in zip(scored, eligible)
         ]
+        collision_candidate_ids = {
+            scored_candidate.candidate_id
+            for scored_candidate in scored
+            if _batch_collision_ids(scored_candidate, reserved_ids)
+        }
+        scored = [
+            _mark_batch_collision(scored_candidate, reserved_ids)
+            for scored_candidate in scored
+        ]
         for source_candidate, scored_candidate in zip(eligible, scored):
             if not (
                 scored_candidate.exact_identifier_chain
@@ -542,7 +634,14 @@ def reconcile_stage_a(
             considered_ids.add(scored_candidate.candidate_id)
             if source_candidate.parent_record_id is not None:
                 considered_ids.add(source_candidate.parent_record_id)
-        outcomes.append(_outcome_from_stage_a_candidates(entry, scored))
+        outcome = _outcome_from_stage_a_candidates(
+            entry,
+            scored,
+            reserved_candidate_ids=collision_candidate_ids,
+        )
+        outcomes.append(outcome)
+        if outcome.autonomous:
+            reserved_ids.update(outcome.selected_ids)
 
     for candidate in pool:
         if candidate.record_id in considered_ids:
@@ -783,26 +882,39 @@ def _bank_match(
     )
 
 
+def _release_lines(
+    held_settlement: SettlementSeed,
+    settlements: list[SettlementSeed],
+    lines_by_settlement: dict[Any, list[SettlementLineSeed]],
+) -> list[tuple[SettlementSeed, SettlementLineSeed]]:
+    held_reference = normalize_reference(held_settlement.provider_settlement_id)
+    return [
+        (current_settlement, current_line)
+        for current_settlement in settlements
+        if current_settlement.id != held_settlement.id
+        for current_line in lines_by_settlement.get(current_settlement.id, [])
+        if _line_kind(current_line) == SettlementLineType.release.value
+        and normalize_reference(current_line.reference) == held_reference
+        and _utc(current_line.business_at) > _utc(held_settlement.business_at)
+    ]
+
+
 def _release_settlements(
     held_settlement: SettlementSeed,
     settlements: list[SettlementSeed],
     lines_by_settlement: dict[Any, list[SettlementLineSeed]],
 ) -> list[SettlementSeed]:
-    releases: list[SettlementSeed] = []
-    held_reference = normalize_reference(held_settlement.provider_settlement_id)
-    for current_settlement in settlements:
-        if current_settlement.id == held_settlement.id:
-            continue
-        release_lines = [
-            current_line
-            for current_line in lines_by_settlement.get(current_settlement.id, [])
-            if _line_kind(current_line) == SettlementLineType.release.value
-            and normalize_reference(current_line.reference) == held_reference
-            and _utc(current_line.business_at) > _utc(held_settlement.business_at)
-        ]
-        if release_lines:
-            releases.append(current_settlement)
-    return releases
+    release_ids = {
+        current_settlement.id
+        for current_settlement, _ in _release_lines(
+            held_settlement, settlements, lines_by_settlement
+        )
+    }
+    return [
+        current_settlement
+        for current_settlement in settlements
+        if current_settlement.id in release_ids
+    ]
 
 
 def _stage_b_candidate(
@@ -920,11 +1032,22 @@ def _stage_b_candidate(
                 for related_settlement in related_settlements
                 if related_settlement.id != held_settlement.id
             ]
-            released_amount = sum(
-                facts_by_id[related_settlement.id].release_adjustments
-                for related_settlement in release_settlements
+            release_entries = _release_lines(
+                held_settlement,
+                release_settlements,
+                lines_by_settlement,
             )
-            release_ok = bool(release_settlements) and released_amount == facts_by_id[
+            released_amount = sum(
+                current_line.amount
+                for _, current_line in release_entries
+            )
+            release_ids = list(
+                dict.fromkeys(
+                    str(current_settlement.id)
+                    for current_settlement, _ in release_entries
+                )
+            )
+            release_ok = bool(release_entries) and released_amount == facts_by_id[
                 held_settlement.id
             ].held_amount
             if not release_ok:
@@ -936,9 +1059,7 @@ def _stage_b_candidate(
                         "held_settlement_id": str(held_settlement.id),
                         "held_amount": facts_by_id[held_settlement.id].held_amount,
                         "released_amount": released_amount,
-                        "release_settlement_ids": [
-                            str(item.id) for item in release_settlements
-                        ],
+                        "release_settlement_ids": release_ids,
                     },
                     10 if release_ok else 0,
                     "pass" if release_ok else "fail",
@@ -1007,6 +1128,7 @@ def reconcile_stage_b(
         )
 
     outcomes: list[EngineOutcome] = []
+    reserved_ids: set[str] = set()
     for current_payment in payments:
         if not current_payment.captured or _status_value(current_payment.status) != "captured":
             continue
@@ -1040,6 +1162,7 @@ def reconcile_stage_b(
         scored_candidates: list[ScoredCandidate] = []
         selected_ids_by_candidate: dict[str, list[str]] = {}
         candidate_contradictions: dict[str, list[str]] = {}
+        collision_candidate_ids: set[str] = set()
         for base_settlement in base_settlements:
             releases = _release_settlements(
                 base_settlement, settlements, lines_by_settlement
@@ -1054,19 +1177,39 @@ def reconcile_stage_b(
                 refunds_by_payment,
                 credits,
             )
+            if _batch_collision_ids(candidate, reserved_ids, selected_ids):
+                collision_candidate_ids.add(candidate.candidate_id)
+            candidate = _mark_batch_collision(
+                candidate,
+                reserved_ids,
+                selected_ids,
+            )
+            contradictions = list(candidate.contradictions)
             scored_candidates.append(candidate)
             selected_ids_by_candidate[candidate.candidate_id] = selected_ids
             candidate_contradictions[candidate.candidate_id] = contradictions
 
+        selectable_candidates = [
+            candidate
+            for candidate in scored_candidates
+            if candidate.candidate_id not in collision_candidate_ids
+        ] or scored_candidates
         scored_candidates.sort(
             key=lambda candidate: (-candidate.score, candidate.candidate_id)
         )
-        selected = scored_candidates[0]
-        runner_up = scored_candidates[1] if len(scored_candidates) > 1 else None
+        selectable_candidates.sort(
+            key=lambda candidate: (-candidate.score, candidate.candidate_id)
+        )
+        selected = selectable_candidates[0]
+        runner_up = (
+            selectable_candidates[1] if len(selectable_candidates) > 1 else None
+        )
         runner_up_score = runner_up.score if runner_up is not None else 0
         margin = selected.score - runner_up_score
         selected_contradictions = candidate_contradictions[selected.candidate_id]
-        if "hold_release_missing" in selected_contradictions:
+        if selected.duplicate:
+            status = ResultStatus.duplicate
+        elif "hold_release_missing" in selected_contradictions:
             status = ResultStatus.missing_settlement
         elif "bank_credit_missing" in selected_contradictions:
             status = ResultStatus.missing_bank_credit
@@ -1076,18 +1219,22 @@ def reconcile_stage_b(
             status = ResultStatus.ambiguous
         else:
             status = ResultStatus.matched
-        outcomes.append(
-            EngineOutcome(
-                status=status,
-                selected_ids=selected_ids_by_candidate[selected.candidate_id],
-                score=selected.score,
-                runner_up_score=runner_up_score,
-                margin=margin,
-                evidence=list(selected.evidence),
-                candidates=scored_candidates,
-                autonomous=can_auto_resolve(selected, runner_up),
-                stage=ReconciliationStage.razorpay_to_settlement,
-            )
+        outcome = EngineOutcome(
+            status=status,
+            selected_ids=selected_ids_by_candidate[selected.candidate_id],
+            score=selected.score,
+            runner_up_score=runner_up_score,
+            margin=margin,
+            evidence=list(selected.evidence),
+            candidates=scored_candidates,
+            autonomous=(
+                status is not ResultStatus.ambiguous
+                and can_auto_resolve(selected, runner_up)
+            ),
+            stage=ReconciliationStage.razorpay_to_settlement,
         )
+        outcomes.append(outcome)
+        if outcome.autonomous:
+            reserved_ids.update(outcome.selected_ids)
 
     return outcomes
