@@ -1,11 +1,19 @@
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
 
 from app.batch.model import Batch
-from app.common.enums import BatchKind, BatchStatus, RunStatus
+from app.common.enums import (
+    BatchKind,
+    BatchStatus,
+    ReconciliationStage,
+    ResultStatus,
+    RunStatus,
+)
 from app.reconciliation import service
+from app.reconciliation.model import EngineOutcome
 from app.reconciliation.service import RunAlreadyRunning
 
 
@@ -136,3 +144,63 @@ async def test_failed_execution_persists_sanitized_failed_run(monkeypatch):
     assert failed_run.status is RunStatus.failed
     assert failed_run.error_message == "Reconciliation failed before completion."
     session.commit.assert_awaited_once()
+
+
+def test_non_autonomous_stage_a_persists_source_links_and_exception(monkeypatch):
+    class Captured:
+        def __init__(self, **values):
+            self.__dict__.update(values)
+
+    monkeypatch.setattr(service, "MatchLink", Captured)
+    monkeypatch.setattr(service, "ReconciliationException", Captured)
+
+    run_id = uuid4()
+    batch_id = uuid4()
+    ledger_id = uuid4()
+    payment_id = uuid4()
+    order_id = uuid4()
+    result = SimpleNamespace(
+        id=uuid4(),
+        primary_source_type="ledger",
+        primary_source_id=ledger_id,
+        stage=ReconciliationStage.ledger_to_razorpay,
+        amount=10_000,
+    )
+    outcome = EngineOutcome(
+        status=ResultStatus.ambiguous,
+        selected_ids=[str(payment_id)],
+        autonomous=False,
+        stage=ReconciliationStage.ledger_to_razorpay,
+    )
+    source_index = {
+        str(ledger_id): ("ledger", SimpleNamespace(id=ledger_id)),
+        str(payment_id): (
+            "razorpay_payment",
+            SimpleNamespace(id=payment_id, provider_order_id="order-1"),
+        ),
+        str(order_id): (
+            "razorpay_order",
+            SimpleNamespace(id=order_id, provider_order_id="order-1"),
+        ),
+    }
+    session = MagicMock()
+
+    service._add_links_and_exception(
+        session,
+        run=SimpleNamespace(id=run_id),
+        result=result,
+        outcome=outcome,
+        source_index=source_index,
+        batch_id=batch_id,
+    )
+
+    added = [call.args[0] for call in session.add.call_args_list]
+    links = [item for item in added if hasattr(item, "role")]
+    exceptions = [item for item in added if hasattr(item, "exception_type")]
+    assert {(link.source_type, link.source_id, link.role) for link in links} == {
+        ("ledger", ledger_id, "primary"),
+        ("razorpay_payment", payment_id, "selected"),
+        ("razorpay_order", order_id, "related"),
+    }
+    assert all(link.autonomous is False for link in links)
+    assert len(exceptions) == 1

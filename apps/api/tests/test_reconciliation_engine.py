@@ -535,6 +535,20 @@ def test_stage_a_excludes_numeric_reference_candidate_outside_amount_bound():
     assert outcomes[1].status is ResultStatus.missing_ledger
 
 
+def test_fixed_numeric_exception_diagnostics_require_a_linked_order():
+    dataset = build_demo_dataset()
+    outcomes = reconcile_stage_a(
+        list(dataset.ledger_entries),
+        list(dataset.razorpay_orders),
+        list(dataset.razorpay_payments),
+        list(dataset.razorpay_refunds),
+    )
+
+    assert outcomes[40].status is ResultStatus.duplicate
+    assert outcomes[60].status is ResultStatus.amount_mismatch
+    assert outcomes[60].autonomous is False
+
+
 def test_stage_a_amount_window_uses_integer_half_percent_rounding():
     amount = 9_276_516_075_116_799
 
@@ -1092,6 +1106,45 @@ def test_fixed_benchmark_stage_autonomy_clears_strict_floor():
         stage_b_by_payment[case.razorpay_payment_id].status is ResultStatus.matched
         for case in positive
     )
+
+
+def test_fixed_weak_exception_reference_is_not_reported_as_a_match():
+    dataset = build_demo_dataset()
+    outcomes = reconcile_stage_a(
+        list(dataset.ledger_entries),
+        list(dataset.razorpay_orders),
+        list(dataset.razorpay_payments),
+        list(dataset.razorpay_refunds),
+    )
+
+    assert outcomes[100].status is ResultStatus.ambiguous
+    assert outcomes[100].autonomous is False
+
+
+def test_stage_b_selected_ids_include_refund_source_records():
+    dataset = build_demo_dataset()
+    case = next(
+        case
+        for case in dataset.truth_cases
+        if case.matchable and case.razorpay_refund_id is not None
+    )
+    captured = [
+        payment
+        for payment in dataset.razorpay_payments
+        if payment.captured and payment.status is RazorpayPaymentStatus.captured
+    ]
+    outcomes = reconcile_stage_b(
+        list(dataset.razorpay_payments),
+        list(dataset.razorpay_refunds),
+        list(dataset.settlements),
+        list(dataset.settlement_lines),
+        list(dataset.bank_credits),
+    )
+    outcome = dict(zip((payment.id for payment in captured), outcomes))[
+        case.razorpay_payment_id
+    ]
+
+    assert str(case.razorpay_refund_id) in outcome.selected_ids
 
 
 def test_engine_outcome_schema_serializes_without_truth_labels():

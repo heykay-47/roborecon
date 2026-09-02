@@ -11,7 +11,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.model import AuditEvent
 from app.batch.model import Batch, IngestionRecord
-from app.common.enums import AuditEventType, ExceptionStatus, RunStatus
+from app.common.enums import (
+    AuditEventType,
+    ExceptionStatus,
+    ReconciliationStage,
+    RunStatus,
+)
 from app.demo.dataset import (
     BankCreditSeed,
     LedgerEntrySeed,
@@ -255,47 +260,47 @@ def _add_links_and_exception(
     source_index: dict[str, tuple[str, Any]],
     batch_id: UUID,
 ) -> None:
-    if outcome.autonomous:
-        links: list[tuple[str, UUID, str]] = []
-        if result.primary_source_id is not None:
-            links.append((result.primary_source_type, result.primary_source_id, "primary"))
-        for selected_id in outcome.selected_ids:
-            source = source_index.get(str(selected_id))
-            if source is not None:
-                links.append((source[0], source[1].id, "selected"))
+    links: list[tuple[str, UUID, str]] = []
+    if result.primary_source_id is not None:
+        links.append((result.primary_source_type, result.primary_source_id, "primary"))
+    for selected_id in outcome.selected_ids:
+        source = source_index.get(str(selected_id))
+        if source is not None:
+            links.append((source[0], source[1].id, "selected"))
 
-        def add_related_order(source: tuple[str, Any]) -> None:
-            source_type, source_row = source
-            provider_order_id: str | None = None
-            if source_type == "razorpay_payment":
-                provider_order_id = source_row.provider_order_id
-            elif source_type == "razorpay_refund":
-                parent_payment = next(
-                    (
-                        row
-                        for row_type, row in source_index.values()
-                        if row_type == "razorpay_payment"
-                        and row.provider_payment_id == source_row.provider_payment_id
-                    ),
-                    None,
-                )
-                provider_order_id = (
-                    parent_payment.provider_order_id if parent_payment is not None else None
-                )
-            if provider_order_id is None:
-                return
-            order = next(
+    def add_related_order(source: tuple[str, Any]) -> None:
+        source_type, source_row = source
+        provider_order_id: str | None = None
+        if source_type == "razorpay_payment":
+            provider_order_id = source_row.provider_order_id
+        elif source_type == "razorpay_refund":
+            parent_payment = next(
                 (
                     row
                     for row_type, row in source_index.values()
-                    if row_type == "razorpay_order"
-                    and row.provider_order_id == provider_order_id
+                    if row_type == "razorpay_payment"
+                    and row.provider_payment_id == source_row.provider_payment_id
                 ),
                 None,
             )
-            if order is not None:
-                links.append(("razorpay_order", order.id, "related"))
+            provider_order_id = (
+                parent_payment.provider_order_id if parent_payment is not None else None
+            )
+        if provider_order_id is None:
+            return
+        order = next(
+            (
+                row
+                for row_type, row in source_index.values()
+                if row_type == "razorpay_order"
+                and row.provider_order_id == provider_order_id
+            ),
+            None,
+        )
+        if order is not None:
+            links.append(("razorpay_order", order.id, "related"))
 
+    if result.stage is ReconciliationStage.ledger_to_razorpay:
         if result.primary_source_id is not None:
             primary_source = source_index.get(str(result.primary_source_id))
             if primary_source is not None:
@@ -304,24 +309,24 @@ def _add_links_and_exception(
             selected_source = source_index.get(str(selected_id))
             if selected_source is not None:
                 add_related_order(selected_source)
-        seen: set[tuple[str, UUID]] = set()
-        for source_type, source_id, role in links:
-            key = (source_type, source_id)
-            if key in seen:
-                continue
-            seen.add(key)
-            session.add(
-                MatchLink(
-                    run_id=run.id,
-                    result_id=result.id,
-                    source_type=source_type,
-                    source_id=source_id,
-                    role=role,
-                    autonomous=True,
-                    actor="system",
-                )
+    seen: set[tuple[str, UUID]] = set()
+    for source_type, source_id, role in links:
+        key = (source_type, source_id)
+        if key in seen:
+            continue
+        seen.add(key)
+        session.add(
+            MatchLink(
+                run_id=run.id,
+                result_id=result.id,
+                source_type=source_type,
+                source_id=source_id,
+                role=role,
+                autonomous=outcome.autonomous,
+                actor="system",
             )
-    else:
+        )
+    if not outcome.autonomous:
         session.add(
             ReconciliationException(
                 run_id=run.id,

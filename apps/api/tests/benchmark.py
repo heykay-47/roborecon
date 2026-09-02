@@ -55,11 +55,6 @@ def fixed_predictions(dataset: DemoDataset) -> list[Prediction]:
     }
     payment_by_id = {str(payment.id): payment for payment in dataset.razorpay_payments}
     refund_by_id = {str(refund.id): refund for refund in dataset.razorpay_refunds}
-    refunds_by_payment = {}
-    for refund in dataset.razorpay_refunds:
-        refunds_by_payment.setdefault(refund.provider_payment_id, []).append(
-            str(refund.id)
-        )
 
     def related_order_id(source_id: str) -> str | None:
         payment = payment_by_id.get(source_id)
@@ -76,7 +71,6 @@ def fixed_predictions(dataset: DemoDataset) -> list[Prediction]:
         return str(order.id) if order is not None else None
 
     predictions = []
-    truth_by_id = {str(case.case_id): case for case in dataset.truth_cases}
     stage_a = reconcile_stage_a(
         list(dataset.ledger_entries),
         list(dataset.razorpay_orders),
@@ -94,18 +88,12 @@ def fixed_predictions(dataset: DemoDataset) -> list[Prediction]:
             order_id = related_order_id(str(selected_id))
             if order_id is not None:
                 selected_ids.append(order_id)
-        case = truth_by_id.get(case_by_source.get(primary_id, ""))
-        status = outcome.status.value
-        autonomous = outcome.autonomous
-        if case is not None and not case.matchable and status == "matched":
-            status = case.expected_status.value
-            autonomous = False
         predictions.append(
             Prediction(
                 case_id=case_by_source.get(primary_id),
-                status=status,
+                status=outcome.status.value,
                 selected_ids=tuple(dict.fromkeys(selected_ids)),
-                autonomous=autonomous,
+                autonomous=outcome.autonomous,
                 stage="ledger_to_razorpay",
             )
         )
@@ -124,20 +112,14 @@ def fixed_predictions(dataset: DemoDataset) -> list[Prediction]:
     )
     for payment, outcome in zip(captured, stage_b):
         primary_id = str(payment.id)
-        selected_ids = [primary_id, *outcome.selected_ids]
-        selected_ids.extend(refunds_by_payment.get(payment.provider_payment_id, []))
-        case = truth_by_id.get(case_by_source.get(primary_id, ""))
-        status = outcome.status.value
-        autonomous = outcome.autonomous
-        if case is not None and not case.matchable and status == "matched":
-            status = case.expected_status.value
-            autonomous = False
         predictions.append(
             Prediction(
                 case_id=case_by_source.get(primary_id),
-                status=status,
-                selected_ids=tuple(dict.fromkeys(selected_ids)),
-                autonomous=autonomous,
+                status=outcome.status.value,
+                selected_ids=tuple(
+                    dict.fromkeys((primary_id, *outcome.selected_ids))
+                ),
+                autonomous=outcome.autonomous,
                 stage="razorpay_to_settlement",
             )
         )

@@ -1,4 +1,3 @@
-import json
 from collections.abc import Iterable
 from datetime import datetime, timezone
 from uuid import UUID
@@ -10,11 +9,12 @@ from app.audit.model import AuditEvent
 from app.batch.model import Batch, IngestionRecord
 from app.common.enums import AuditEventType, BatchKind, BatchStatus
 from app.demo.dataset import DemoDataset, TruthCaseSeed, build_demo_dataset
+from app.demo.source_service import persist_source_records
+from app.demo.source_service import source_counts as _source_counts
 from app.evaluation.model import EvaluationCase, GroundTruthLink
 from app.ledger.model import LedgerEntry
 from app.razorpay.model import RazorpayOrder, RazorpayPayment, RazorpayRefund
 from app.settlement.model import BankCredit, Settlement, SettlementLine
-
 
 ROBORECON_TABLES = (
     GroundTruthLink,
@@ -33,18 +33,7 @@ ROBORECON_TABLES = (
 
 
 def source_counts(dataset: DemoDataset) -> dict[str, int]:
-    """Return deterministic counts for the top-level source rows in a demo batch."""
-    counts = {
-        "ledger": len(dataset.ledger_entries),
-        "razorpayOrders": len(dataset.razorpay_orders),
-        "razorpayPayments": len(dataset.razorpay_payments),
-        "razorpayRefunds": len(dataset.razorpay_refunds),
-        "settlements": len(dataset.settlements),
-        "bankCredits": len(dataset.bank_credits),
-        "quarantined": len(dataset.malformed_rows),
-    }
-    counts["total"] = sum(counts.values())
-    return counts
+    return _source_counts(dataset)
 
 
 async def _clear_roborecon_tables(session: AsyncSession) -> None:
@@ -56,128 +45,7 @@ async def persist_demo_sources(
     session: AsyncSession, dataset: DemoDataset, batch: Batch
 ) -> None:
     """Persist canonical source records and quarantine rows, excluding truth."""
-    session.add_all(
-        [
-            LedgerEntry(
-                id=entry.id,
-                batch_id=batch.id,
-                reference=entry.reference,
-                entry_type=entry.entry_type,
-                amount=entry.amount,
-                currency=entry.currency,
-                business_at=entry.business_at,
-            )
-            for entry in dataset.ledger_entries
-        ]
-    )
-    session.add_all(
-        [
-            RazorpayOrder(
-                id=order.id,
-                batch_id=batch.id,
-                provider_order_id=order.provider_order_id,
-                receipt=order.receipt,
-                amount=order.amount,
-                currency=order.currency,
-                status=order.status,
-                business_at=order.business_at,
-            )
-            for order in dataset.razorpay_orders
-        ]
-    )
-    session.add_all(
-        [
-            RazorpayPayment(
-                id=payment.id,
-                batch_id=batch.id,
-                provider_payment_id=payment.provider_payment_id,
-                provider_order_id=payment.provider_order_id,
-                receipt=payment.receipt,
-                amount=payment.amount,
-                currency=payment.currency,
-                status=payment.status,
-                captured=payment.captured,
-                business_at=payment.business_at,
-            )
-            for payment in dataset.razorpay_payments
-        ]
-    )
-    session.add_all(
-        [
-            RazorpayRefund(
-                id=refund.id,
-                batch_id=batch.id,
-                provider_refund_id=refund.provider_refund_id,
-                provider_payment_id=refund.provider_payment_id,
-                amount=refund.amount,
-                currency=refund.currency,
-                status=refund.status,
-                business_at=refund.business_at,
-            )
-            for refund in dataset.razorpay_refunds
-        ]
-    )
-    session.add_all(
-        [
-            Settlement(
-                id=settlement.id,
-                batch_id=batch.id,
-                provider_settlement_id=settlement.provider_settlement_id,
-                amount=settlement.amount,
-                fee=settlement.fee,
-                tax=settlement.tax,
-                held_amount=settlement.held_amount,
-                currency=settlement.currency,
-                utr=settlement.utr,
-                status=settlement.status,
-                business_at=settlement.business_at,
-            )
-            for settlement in dataset.settlements
-        ]
-    )
-    session.add_all(
-        [
-            SettlementLine(
-                id=line.id,
-                batch_id=batch.id,
-                settlement_id=line.settlement_id,
-                line_type=line.line_type,
-                reference=line.reference,
-                amount=line.amount,
-                currency=line.currency,
-                business_at=line.business_at,
-            )
-            for line in dataset.settlement_lines
-        ]
-    )
-    session.add_all(
-        [
-            BankCredit(
-                id=credit.id,
-                batch_id=batch.id,
-                settlement_id=credit.settlement_id,
-                utr=credit.utr,
-                amount=credit.amount,
-                currency=credit.currency,
-                business_at=credit.business_at,
-            )
-            for credit in dataset.bank_credits
-        ]
-    )
-    session.add_all(
-        [
-            IngestionRecord(
-                id=row.id,
-                batch_id=batch.id,
-                source_type=row.source_type,
-                row_number=row.row_number,
-                parse_status="quarantined",
-                parse_error=row.parse_error,
-                raw_payload=json.loads(row.raw_payload),
-            )
-            for row in dataset.malformed_rows
-        ]
-    )
+    await persist_source_records(session, dataset, batch)
 
 
 def _truth_source_ids(case: TruthCaseSeed) -> Iterable[tuple[str, UUID]]:

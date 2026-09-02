@@ -1,11 +1,54 @@
 import uuid
+from collections.abc import Mapping
 from dataclasses import dataclass
+from typing import Any
 
 from sqlalchemy import Boolean, Enum, ForeignKey, Integer, String
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.base import Base
 from app.common.enums import ResultStatus
+
+
+EVALUATION_REPORT_VERSION = 1
+_REQUIRED_EVALUATION_REPORT_KEYS = frozenset(
+    {
+        "benchmark_available",
+        "precision",
+        "false_positives",
+        "false_positive_rate",
+        "match_rate",
+        "end_to_end_autonomy_rate",
+        "exception_recall",
+        "correctly_resolved",
+        "matchable_cases",
+        "autonomous_cases",
+        "open_exceptions",
+        "financially_unresolved_cases",
+        "money_reconciled",
+        "money_unresolved",
+        "settlement_net",
+        "records_processed",
+        "duration_ms",
+        "throughput",
+        "per_class",
+        "stage_metrics",
+        "review_adjusted",
+        "acceptance_checks",
+        "acceptance_passed",
+    }
+)
+
+
+def is_current_evaluation_report(metrics: Mapping[str, Any] | None) -> bool:
+    if not isinstance(metrics, Mapping):
+        return False
+    version = metrics.get("reportVersion", metrics.get("report_version"))
+    return (
+        type(version) is int
+        and version == EVALUATION_REPORT_VERSION
+        and _REQUIRED_EVALUATION_REPORT_KEYS.issubset(metrics)
+    )
 
 
 class EvaluationCase(Base):

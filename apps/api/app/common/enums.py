@@ -124,6 +124,9 @@ class ReviewAction(str, enum.Enum):
 class AuditEventType(str, enum.Enum):
     batch_created = "batch.created"
     demo_reset_completed = "demo.reset.completed"
+    razorpay_sync_started = "razorpay.sync.started"
+    razorpay_sync_completed = "razorpay.sync.completed"
+    razorpay_sync_failed = "razorpay.sync.failed"
     run_started = "run.started"
     run_completed = "run.completed"
     run_failed = "run.failed"

@@ -1,0 +1,14 @@
+{
+  "entity": "collection",
+  "count": 1,
+  "items": [
+    {
+      "id": "rfnd_demo_001",
+      "payment_id": "pay_demo_001",
+      "amount": 25000,
+      "currency": "INR",
+      "status": "processed",
+      "created_at": 1754000200
+    }
+  ]
+}

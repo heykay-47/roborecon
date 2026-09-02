@@ -1,0 +1,25 @@
+{
+  "entity": "collection",
+  "count": 1,
+  "items": [
+    {
+      "entity_id": "pay_demo_001",
+      "type": "payment",
+      "debit": 0,
+      "credit": 122000,
+      "amount": 125000,
+      "currency": "INR",
+      "fee": 2500,
+      "tax": 500,
+      "on_hold": false,
+      "settled": true,
+      "created_at": 1754000300,
+      "settled_at": 1754000400,
+      "settlement_id": "setl_demo_001",
+      "payment_id": "pay_demo_001",
+      "settlement_utr": "UTR-DEMO-001",
+      "order_id": "order_demo_001",
+      "order_receipt": "RCPT-0001"
+    }
+  ]
+}

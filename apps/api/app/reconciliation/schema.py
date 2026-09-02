@@ -12,6 +12,7 @@ from app.common.enums import (
     ResultStatus,
     RunStatus,
 )
+from app.evaluation.model import EVALUATION_REPORT_VERSION
 
 
 class CriterionEvidenceSchema(ApiModel):
@@ -81,6 +82,7 @@ class StageMetricsSchema(ApiModel):
 
 
 class EvaluationReportSchema(ApiModel):
+    report_version: int = EVALUATION_REPORT_VERSION
     benchmark_available: bool
     precision: float | None
     false_positives: int | None

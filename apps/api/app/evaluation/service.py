@@ -11,6 +11,7 @@ from app.batch.model import Batch
 from app.common.enums import ExceptionStatus, RunStatus
 from app.evaluation.model import (
     ClassMetrics,
+    EVALUATION_REPORT_VERSION,
     EvaluationCase,
     EvaluationReport,
     GroundTruthLink,
@@ -296,7 +297,10 @@ def _case_is_autonomously_resolved(
         case.expected_status == "matched"
         and _case_is_correct(case, predictions)
         and bool(predictions)
-        and all(prediction.autonomous for prediction in predictions)
+        and all(
+            prediction.autonomous and prediction.review_status is None
+            for prediction in predictions
+        )
     )
 
 
@@ -745,6 +749,7 @@ def report_to_dict(report: EvaluationReport) -> dict[str, Any]:
         else None
     )
     data["benchmarkAvailable"] = report.benchmark_available
+    data["reportVersion"] = EVALUATION_REPORT_VERSION
     data["benchmarkUnavailable"] = report.benchmark_unavailable
     data["sourceThroughput"] = report.source_throughput
     data["acceptancePassed"] = report.acceptance_passed
@@ -845,9 +850,14 @@ async def evaluate_run(
 
     for result in result_rows:
         links = links_by_result.get(result.id, [])
-        selected_ids = tuple(str(link.source_id) for link in links)
-        if not selected_ids:
-            selected_ids = tuple(str(item) for item in (result.selected_ids or []))
+        selected_ids = tuple(
+            dict.fromkeys(
+                (
+                    *(str(link.source_id) for link in links),
+                    *(str(item) for item in (result.selected_ids or [])),
+                )
+            )
+        )
         if result.primary_source_id is not None:
             selected_ids = tuple(
                 dict.fromkeys((str(result.primary_source_id), *selected_ids))

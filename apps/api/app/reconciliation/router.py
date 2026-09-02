@@ -7,6 +7,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.batch.model import Batch
 from app.common.enums import RunStatus
 from app.database import get_session
+from app.evaluation.model import is_current_evaluation_report
 from app.evaluation.service import evaluate_run
 from app.reconciliation.model import (
     MatchLink,
@@ -50,6 +51,7 @@ async def _run_response(
     *,
     include_detail: bool,
 ) -> ReconciliationRunResponse:
+    await _evaluate_if_needed(session, run)
     batch = await session.get(Batch, run.batch_id)
     if batch is None:
         raise HTTPException(status_code=500, detail="Reconciliation batch is missing")
@@ -109,7 +111,9 @@ async def _evaluate_if_needed(
     run: ReconciliationRun,
 ) -> None:
     run_status = run.status.value if hasattr(run.status, "value") else str(run.status)
-    if run_status == RunStatus.completed.value and run.metrics is None:
+    if run_status == RunStatus.completed.value and not is_current_evaluation_report(
+        run.metrics
+    ):
         await evaluate_run(session, run.id)
 
 

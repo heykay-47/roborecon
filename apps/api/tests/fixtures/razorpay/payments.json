@@ -1,0 +1,15 @@
+{
+  "entity": "collection",
+  "count": 1,
+  "items": [
+    {
+      "id": "pay_demo_001",
+      "order_id": "order_demo_001",
+      "amount": 125000,
+      "currency": "INR",
+      "status": "captured",
+      "captured": true,
+      "created_at": 1754000120
+    }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "entity": "collection",
+  "count": 1,
+  "items": [
+    {
+      "id": "order_demo_002",
+      "amount": 99000,
+      "currency": "INR",
+      "receipt": "RCPT-0002",
+      "status": "paid",
+      "created_at": 1754000060
+    }
+  ]
+}

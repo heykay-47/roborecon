@@ -1,3 +1,5 @@
+from unittest.mock import AsyncMock
+
 import pytest
 
 
@@ -118,3 +120,75 @@ def test_metrics_schema_serializes_strict_stage_and_end_to_end_fields():
     assert serialized["exceptionRecall"] == 100.0
     assert serialized["stageMetrics"]["ledger_to_razorpay"]["autonomyRate"] == 100.0
     assert "autonomousResolutionRate" not in serialized
+
+
+@pytest.mark.asyncio
+async def test_completed_run_with_legacy_metrics_is_recomputed_before_schema_validation(
+    monkeypatch,
+):
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from app.common.enums import RunStatus
+    from app.reconciliation import router as reconciliation_router
+    from app.reconciliation.schema import EvaluationReportSchema
+
+    stage = {
+        "eligible_cases": 1,
+        "correctly_resolved": 1,
+        "correctness_rate": 100.0,
+        "autonomous_cases": 1,
+        "autonomy_rate": 100.0,
+        "autonomous_links": 3,
+        "false_positives": 0,
+        "precision": 100.0,
+        "unresolved_cases": 0,
+        "open_exceptions": 0,
+        "records_processed": 1,
+    }
+    current_metrics = {
+        "reportVersion": 1,
+        "benchmark_available": True,
+        "precision": 100.0,
+        "false_positives": 0,
+        "false_positive_rate": 0.0,
+        "match_rate": 100.0,
+        "end_to_end_autonomy_rate": 100.0,
+        "exception_recall": 100.0,
+        "correctly_resolved": 1,
+        "matchable_cases": 1,
+        "autonomous_cases": 1,
+        "open_exceptions": 0,
+        "financially_unresolved_cases": 0,
+        "money_reconciled": 10_000,
+        "money_unresolved": 0,
+        "settlement_net": 9_764,
+        "records_processed": 1,
+        "duration_ms": 100,
+        "throughput": 10.0,
+        "per_class": None,
+        "stage_metrics": {
+            "ledger_to_razorpay": stage,
+            "razorpay_to_settlement": stage,
+        },
+        "review_adjusted": {},
+        "acceptance_checks": {},
+        "acceptance_passed": True,
+    }
+    run = SimpleNamespace(
+        id=uuid4(),
+        status=RunStatus.completed,
+        metrics={"precision": 100.0},
+    )
+    session = object()
+    evaluate = AsyncMock(
+        side_effect=lambda session, run_id: run.metrics.update(current_metrics)
+    )
+    monkeypatch.setattr(reconciliation_router, "evaluate_run", evaluate)
+
+    await reconciliation_router._evaluate_if_needed(session, run)
+    report = EvaluationReportSchema.model_validate(run.metrics)
+
+    evaluate.assert_awaited_once_with(session, run.id)
+    assert report.report_version == 1
+    assert report.end_to_end_autonomy_rate == 100.0

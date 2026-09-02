@@ -86,6 +86,7 @@ class _StageACandidate:
     parent_amount: int | None = None
     parent_record_id: str | None = None
     order_payment_chain: bool = False
+    has_linked_order: bool = False
 
 
 def _stage_a_pool(
@@ -134,6 +135,7 @@ def _stage_a_pool(
                     and current_payment.captured
                     and _status_value(current_payment.status) == "captured"
                 ),
+                has_linked_order=linked_order is not None,
             )
         )
 
@@ -183,6 +185,7 @@ def _stage_a_pool(
                     and parent_payment.captured
                     and _status_value(parent_payment.status) == "captured"
                 ),
+                has_linked_order=parent_order is not None,
             )
         )
 
@@ -228,7 +231,16 @@ def _reference_similarity(
         normalized_reference = normalize_reference(reference)
         reference_digits = "".join(re.findall(r"\d+", normalized_reference))
         if entry_digits and entry_digits == reference_digits:
-            similarities.append(0.85)
+            entry_text = re.sub(r"\d+", "", normalized_entry)
+            reference_text = re.sub(r"\d+", "", normalized_reference)
+            lexical_similarity = SequenceMatcher(
+                None,
+                entry_text,
+                reference_text,
+            ).ratio()
+            similarities.append(
+                0.85 if lexical_similarity >= 0.5 else lexical_similarity
+            )
             continue
         similarities.append(
             SequenceMatcher(
@@ -263,9 +275,29 @@ def _same_reference(left: str, right: str) -> bool:
 
 def _has_reference_evidence(candidate: ScoredCandidate) -> bool:
     return any(
-        evidence.rule_code == "REFERENCE" and evidence.points > 0
+        evidence.rule_code == "REFERENCE"
+        and evidence.points > 0
+        and not evidence.observed_values.get("numeric_only", False)
         for evidence in candidate.evidence
     )
+
+
+def _has_numeric_reference_evidence(candidate: ScoredCandidate) -> bool:
+    for evidence in candidate.evidence:
+        if evidence.rule_code != "REFERENCE":
+            continue
+        if evidence.observed_values.get("numeric_only", False):
+            return True
+        observed = evidence.observed_values
+        ledger_digits = "".join(
+            re.findall(r"\d+", str(observed.get("normalized_ledger_reference", "")))
+        )
+        provider_digits = "".join(
+            re.findall(r"\d+", str(observed.get("normalized_provider_reference", "")))
+        )
+        if ledger_digits and ledger_digits == provider_digits:
+            return True
+    return False
 
 
 def _batch_collision_ids(
@@ -367,9 +399,16 @@ def _eligible_stage_a(
         return True
     if candidate.currency != entry.currency:
         return False
-    if not _amount_compatible(entry, candidate):
-        return False
-    return _date_distance(entry.business_at, candidate.business_at) <= STAGE_A_DATE_WINDOW
+    date_is_eligible = (
+        _date_distance(entry.business_at, candidate.business_at) <= STAGE_A_DATE_WINDOW
+    )
+    return date_is_eligible and (
+        _amount_compatible(entry, candidate)
+        or (
+            candidate.has_linked_order
+            and bool(_numeric_reference_key(entry, candidate))
+        )
+    )
 
 
 def _stage_a_score(
@@ -383,6 +422,7 @@ def _stage_a_score(
     exact_identifier = matched_identifier is not None
     normalized_entry = normalize_reference(entry.reference)
     normalized_reference = normalize_reference(candidate.original_reference)
+    numeric_reference = bool(_numeric_reference_key(entry, candidate))
 
     if candidate.currency == entry.currency:
         evidence.append(
@@ -406,6 +446,7 @@ def _stage_a_score(
             )
         )
 
+    numeric_only = False
     if exact_identifier:
         score += 45
         reference_result = "pass"
@@ -424,12 +465,20 @@ def _stage_a_score(
         else:
             reference_points = 0
             reference_result = "fail"
-        reference_explanation = "Reference similarity is bounded and does not establish identity alone."
+        numeric_only = numeric_reference and reference_points == 0
+        if numeric_only:
+            reference_points = 20
+            score += reference_points
+            reference_result = "weak"
+        reference_explanation = (
+            "Reference similarity is bounded and does not establish identity alone."
+        )
     reference_observed_values: dict[str, Any] = {
         "ledger_reference": entry.reference,
         "provider_reference": candidate.original_reference,
         "normalized_ledger_reference": normalized_entry,
         "normalized_provider_reference": normalized_reference,
+        "numeric_only": numeric_only if not exact_identifier else False,
     }
     if matched_identifier is not None:
         reference_observed_values.update(
@@ -602,6 +651,7 @@ def _outcome_from_stage_a_candidates(
     if (
         not selected.exact_identifier_chain
         and not _has_reference_evidence(selected)
+        and not _has_numeric_reference_evidence(selected)
         and selected.score < STAGE_A_MINIMUM_SCORE
     ):
         return EngineOutcome(
@@ -630,6 +680,8 @@ def _outcome_from_stage_a_candidates(
         status = ResultStatus.duplicate
     elif selected.contradictions:
         status = ResultStatus.amount_mismatch
+    elif not _has_reference_evidence(selected):
+        status = ResultStatus.ambiguous
     elif runner_up is not None and margin < 15:
         status = ResultStatus.ambiguous
     else:
@@ -1078,6 +1130,7 @@ def _stage_b_candidate(
 
     payment_refunds = refunds_by_payment.get(current_payment.provider_payment_id, [])
     for current_refund in payment_refunds:
+        selected_ids.append(str(current_refund.id))
         if current_refund.currency != current_payment.currency:
             contradictions.append("refund_currency_contradiction")
         if current_refund.amount > current_payment.amount:

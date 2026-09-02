@@ -16,6 +16,10 @@ class Settings(BaseSettings):
     serverless: bool = False
     razorpay_key_id: str | None = None
     razorpay_key_secret: str | None = None
+    razorpay_base_url: str = "https://api.razorpay.com"
+    razorpay_page_size: int = Field(default=100, ge=1, le=100)
+    razorpay_max_pages: int = Field(default=10, ge=1, le=50)
+    razorpay_timeout_seconds: float = Field(default=10.0, gt=0, le=60.0)
     gemini_api_key: str | None = None
     groq_api_key: str | None = None
     gemini_model: str = "gemini-2.5-flash"
