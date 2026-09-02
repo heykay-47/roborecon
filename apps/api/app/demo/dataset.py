@@ -5,8 +5,8 @@ from uuid import UUID, uuid5
 
 from app.common.enums import (
     LedgerEntryType,
-    ResultStatus,
     RazorpayPaymentStatus,
+    ResultStatus,
     SettlementLineType,
 )
 from app.common.money import calculate_fee, calculate_gst
@@ -361,7 +361,9 @@ def build_demo_dataset(seed: str = DEFAULT_SEED) -> DemoDataset:
                 expected_status=expected_status,
                 ledger_entry_id=ledger_id,
                 razorpay_order_id=order.id,
-                razorpay_payment_id=(payment_by_case[index].id if index in payment_by_case else None),
+                razorpay_payment_id=(
+                    payment_by_case[index].id if index in payment_by_case else None
+                ),
                 razorpay_refund_id=(
                     _seeded_stable_id(seed, "razorpay-refund", case_key)
                     if "refund" in tags

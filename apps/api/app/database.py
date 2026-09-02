@@ -7,6 +7,8 @@ from app.config import settings
 
 engine_options = {}
 if settings.serverless:
+    # Neon pooled endpoints use PgBouncer transaction pooling; asyncpg's
+    # prepared-statement cache must be disabled for that connection mode.
     engine_options = {
         "poolclass": NullPool,
         "connect_args": {"statement_cache_size": 0},

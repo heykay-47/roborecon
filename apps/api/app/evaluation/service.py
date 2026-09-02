@@ -10,8 +10,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.batch.model import Batch
 from app.common.enums import ExceptionStatus, RunStatus
 from app.evaluation.model import (
-    ClassMetrics,
     EVALUATION_REPORT_VERSION,
+    ClassMetrics,
     EvaluationCase,
     EvaluationReport,
     GroundTruthLink,
@@ -27,7 +27,6 @@ from app.reconciliation.model import (
     ReconciliationRun,
 )
 from app.settlement.model import Settlement
-
 
 MATCH_RATE_TARGET = 95.0
 END_TO_END_AUTONOMY_TARGET = 90.0

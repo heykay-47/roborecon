@@ -28,8 +28,26 @@ _DANGEROUS_REQUEST = re.compile(
     re.IGNORECASE,
 )
 _INJECTION_REQUEST = re.compile(
-    r"(?:ignore\s+(?:all\s+)?previous|system\s+prompt|reveal\s+instructions|"
-    r"show\s+all\s+records)",
+    r"(?:"
+    r"\b(?:ignore|disregard|forget)\b[\s\S]{0,80}\b"
+    r"(?:previous|prior|earlier|instructions?|rules?|prompt|message)\b"
+    r"|\boverride\b[\s\S]{0,80}\b"
+    r"(?:system|developer|instructions?|rules?|prompt|message)\b"
+    r"|\b(?:follow|override)\b[\s\S]{0,80}\b"
+    r"(?:the\s+)?(?:new\s+)?(?:system|developer)\b[\s\S]{0,40}\b"
+    r"(?:instructions?|rules?|prompt|message)\b"
+    r"|\bdo\s+not\s+follow\b[\s\S]{0,80}\b"
+    r"(?:system|developer|instructions?|rules?|prompt|message)\b"
+    r"|\bact\s+as\s+(?:an?\s+|the\s+)?"
+    r"(?:system|developer|admin(?:istrator)?|root|unrestricted|different|new|other)\b"
+    r"|\byou\s+are\s+now\b"
+    r"|\b(?:impersonate|impersonating|pretend\s+to\s+be|pose\s+as)\b"
+    r"|\b(?:reveal|show|print|repeat|expose)\b[\s\S]{0,80}\b"
+    r"(?:system|developer)\s+(?:prompt|message|instructions?)\b"
+    r"|\bsystem\s+prompt\b"
+    r"|\breveal\s+instructions\b"
+    r"|\bshow\s+all\s+records\b"
+    r")",
     re.IGNORECASE,
 )
 _DANGEROUS_PROVIDER_OUTPUT = re.compile(
@@ -41,9 +59,11 @@ _CURRENCY_MARKER = re.compile(r"(?<![\w.])(?:INR|Rs\.?|₹)", re.IGNORECASE)
 _CURRENCY_NUMBER = re.compile(r"\s*(-?[\d,]+(?:\.\d+)?)")
 _STRICT_PAISE = re.compile(r"-?(?:\d{1,3}(?:,\d{3})+|\d+)\.\d{2}")
 _UNSUPPORTED_CURRENCY = re.compile(
-    r"(?<![\w.])(?:USD|EUR|GBP|[$€£])\s*-?[\d,]+(?:\.\d+)?",
+    r"(?<![\w.])(?!(?:INR|Rs\.?)(?![\w.]))"
+    r"(?:[A-Z]{2,5}|[$€£¥₽₩₺])\s*-?[\d,]+(?:\.\d+)?",
     re.IGNORECASE,
 )
+_BARE_NUMBER = re.compile(r"(?<![\w])-?[\d][\d,]*(?:\.\d+)?(?![\w])")
 
 
 class CopilotValidationError(ValueError):
@@ -100,17 +120,24 @@ def _provider_currency_amounts(answer: str) -> list[int]:
     if _UNSUPPORTED_CURRENCY.search(answer):
         raise ValueError("Provider answer contains an unsupported currency claim")
     amounts: list[int] = []
+    consumed_ranges: list[tuple[int, int]] = []
     for marker in _CURRENCY_MARKER.finditer(answer):
         number = _CURRENCY_NUMBER.match(answer, marker.end())
         if number is None:
             raise ValueError("Provider currency claim is missing an amount")
         raw_value = number.group(1)
         amounts.append(_parse_inr(raw_value))
+        consumed_ranges.append((number.start(1), number.end(1)))
         trailing = answer[number.end() :]
         if trailing.startswith((".", ",")) and len(trailing) > 1 and trailing[1].isdigit():
             raise ValueError("Provider currency claim is ambiguous")
         if trailing and trailing[0].isalnum():
             raise ValueError("Provider currency claim is malformed")
+    if any(
+        not any(start <= number.start() and number.end() <= end for start, end in consumed_ranges)
+        for number in _BARE_NUMBER.finditer(answer)
+    ):
+        raise ValueError("Provider answer contains a bare numeric claim")
     return amounts
 
 
@@ -338,19 +365,23 @@ def _validate_provider_answer(
 
 
 async def _release_read_transaction(session: AsyncSession) -> bool:
-    in_transaction = getattr(session, "in_transaction", None)
-    if not callable(in_transaction):
-        return True
-    transaction = in_transaction()
-    if isawaitable(transaction):
-        transaction = await transaction
-    if transaction is None:
+    if not await _transaction_is_active(session):
         return True
     try:
         await session.rollback()
     except Exception:
         return False
     return True
+
+
+async def _transaction_is_active(session: AsyncSession) -> bool:
+    in_transaction = getattr(session, "in_transaction", None)
+    if not callable(in_transaction):
+        return False
+    transaction = in_transaction()
+    if isawaitable(transaction):
+        transaction = await transaction
+    return bool(transaction)
 
 
 async def _provider_answer(
@@ -444,6 +475,7 @@ async def answer_question(
             "settlement_id is required for a grounded settlement explanation",
         )
     requested_run_id = _as_uuid(run_id, "run_id")
+    caller_transaction_active = await _transaction_is_active(session)
     run = None
     if requested_run_id is not None:
         run = await session.get(ReconciliationRun, requested_run_id)
@@ -498,6 +530,34 @@ async def answer_question(
     except ValueError:
         breakdown_error = "invalid_breakdown"
 
+    if breakdown_error is not None:
+        if not caller_transaction_active and not await _release_read_transaction(session):
+            trace[0]["status"] = "rejected"
+            trace[0]["error"] = "transaction_release_failed"
+            return _fallback(
+                None,
+                [],
+                trace,
+                error_code="transaction_release_failed",
+            )
+        trace[0]["status"] = "rejected"
+        trace[0]["error"] = breakdown_error
+        return _fallback(None, [], trace, error_code=breakdown_error)
+
+    if caller_transaction_active:
+        trace.append(
+            {
+                "status": "provider_skipped",
+                "reason": "caller_transaction_active",
+            }
+        )
+        return _fallback(
+            calculation,
+            citations,
+            trace,
+            error_code="provider_scope_unavailable",
+        )
+
     if not await _release_read_transaction(session):
         trace[0]["status"] = "rejected"
         trace[0]["error"] = "transaction_release_failed"
@@ -507,11 +567,6 @@ async def answer_question(
             trace,
             error_code="transaction_release_failed",
         )
-    if breakdown_error is not None:
-        trace[0]["status"] = "rejected"
-        trace[0]["error"] = breakdown_error
-        return _fallback(None, [], trace, error_code=breakdown_error)
-
     if run is None:
         trace.append({"status": "provider_skipped", "reason": "run_required"})
         return _fallback(

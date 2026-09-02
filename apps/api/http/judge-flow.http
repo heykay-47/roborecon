@@ -1,0 +1,30 @@
+@baseUrl = http://localhost:8000
+@batchId = replace-with-response-batch-id
+@runId = replace-with-response-run-id
+
+### 1. Confirm the API is available
+GET {{baseUrl}}/health
+
+### 2. Reset the deterministic 120-case demo batch
+POST {{baseUrl}}/demo/reset
+
+### 3. Run both reconciliation stages
+POST {{baseUrl}}/reconciliation-runs
+Content-Type: application/json
+
+{
+  "batchId": "{{batchId}}"
+}
+
+### 4. Inspect acceptance metrics
+GET {{baseUrl}}/metrics?run_id={{runId}}
+
+### 5. Inspect exceptions and persisted evidence
+GET {{baseUrl}}/exceptions?run_id={{runId}}&status=open
+GET {{baseUrl}}/transactions?batch_id={{batchId}}&page=1&page_size=25
+
+### 6. Inspect outcome-focused audit events
+GET {{baseUrl}}/audit-events?batch_id={{batchId}}&page=1&page_size=50
+
+### Optional: run the read-only Razorpay Test Mode adapter
+POST {{baseUrl}}/razorpay/sync

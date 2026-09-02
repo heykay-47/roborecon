@@ -68,6 +68,7 @@ async def list_events(
     batch_id: UUID | None = None,
     entity_type: str | None = None,
     entity_id: UUID | None = None,
+    event_type: AuditEventType | None = None,
     page: int = 1,
     page_size: int = 50,
 ) -> tuple[list[AuditEvent], int]:
@@ -78,6 +79,8 @@ async def list_events(
         filters.append(AuditEvent.entity_type == entity_type)
     if entity_id is not None:
         filters.append(AuditEvent.entity_id == entity_id)
+    if event_type is not None:
+        filters.append(AuditEvent.event_type == event_type)
     count_query = select(func.count()).select_from(AuditEvent).where(*filters)
     total = int((await session.execute(count_query)).scalar() or 0)
     query = (

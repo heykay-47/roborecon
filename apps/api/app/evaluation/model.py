@@ -9,7 +9,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 from app.common.base import Base
 from app.common.enums import ResultStatus
 
-
 EVALUATION_REPORT_VERSION = 1
 _REQUIRED_EVALUATION_REPORT_KEYS = frozenset(
     {

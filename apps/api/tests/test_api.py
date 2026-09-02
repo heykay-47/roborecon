@@ -48,6 +48,109 @@ async def test_exception_and_audit_collections_are_paginated(client):
 
 
 @pytest.mark.asyncio
+async def test_investigation_endpoint_persists_and_returns_advisory_result(client, monkeypatch):
+    from app.ai.model import AIInvestigation, InvestigationMode
+    from app.exception import router as exception_router
+
+    exception_id = uuid4()
+    investigation = AIInvestigation(
+        investigation_id=uuid4(),
+        exception_id=exception_id,
+        run_id=uuid4(),
+        batch_id=uuid4(),
+        mode=InvestigationMode.deterministic_fallback,
+        provider=None,
+        model=None,
+        recommendation="Review the persisted evidence.",
+        confidence=0,
+        citations=[],
+        tool_trace=[],
+        error_code="provider_unavailable",
+        error_message="No configured AI provider was available.",
+    )
+    investigate = AsyncMock(return_value=investigation)
+    monkeypatch.setattr(exception_router, "investigate_exception", investigate, raising=False)
+
+    response = await client.post(
+        f"/exceptions/{exception_id}/investigate",
+        json={"actor": " analyst-7 "},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["investigationId"] == str(investigation.investigation_id)
+    investigate.assert_awaited_once()
+    assert investigate.await_args.args[1] == exception_id
+    assert investigate.await_args.kwargs == {"actor": "analyst-7"}
+
+
+def test_exception_response_exposes_created_at_and_ai_readiness():
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from app.reconciliation.schema import ExceptionResponse
+
+    response = ExceptionResponse.model_validate(
+        SimpleNamespace(
+            id=uuid4(),
+            run_id=uuid4(),
+            batch_id=uuid4(),
+            result_id=None,
+            status="open",
+            exception_type="duplicate",
+            source_type="ledger",
+            source_id=uuid4(),
+            amount=1_000,
+            message="Duplicate source record",
+            review_note=None,
+            reviewed_by=None,
+            reviewed_at=None,
+            created_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+        )
+    )
+
+    serialized = response.model_dump(mode="json", by_alias=True)
+
+    assert serialized["createdAt"] == "2026-08-26T00:00:00Z"
+    assert serialized["aiReady"] is True
+
+
+def test_exception_priority_prefers_open_ready_high_value_and_older_cases():
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from app.exception.router import _exception_sort_key
+
+    older = SimpleNamespace(
+        id=uuid4(),
+        status="open",
+        amount=10_000,
+        exception_type="duplicate",
+        created_at=datetime(2026, 8, 25, tzinfo=timezone.utc),
+    )
+    higher_value = SimpleNamespace(
+        id=uuid4(),
+        status="open",
+        amount=20_000,
+        exception_type="amount_mismatch",
+        created_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
+    )
+    closed = SimpleNamespace(
+        id=uuid4(),
+        status="approved",
+        amount=99_000,
+        exception_type="duplicate",
+        created_at=datetime(2026, 8, 24, tzinfo=timezone.utc),
+    )
+
+    ordered = sorted(
+        [closed, older, higher_value],
+        key=lambda row: _exception_sort_key(row, ai_ready=row.status == "open"),
+    )
+
+    assert ordered == [higher_value, older, closed]
+
+
+@pytest.mark.asyncio
 async def test_exception_endpoints_return_not_found_for_absent_ids(client):
     exception_id = uuid4()
 

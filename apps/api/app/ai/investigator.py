@@ -59,6 +59,11 @@ _ERROR_MESSAGES = {
 }
 
 
+def sanitize_actor(actor: str | None, *, fallback: str = "ai") -> str:
+    normalized = " ".join((actor or "").split())
+    return normalized[:100] or fallback
+
+
 def _as_uuid(value: Any) -> UUID | None:
     try:
         return UUID(str(value))
@@ -367,6 +372,8 @@ async def _persist(
 async def _audit_investigation(
     session: AsyncSession,
     investigation: AIInvestigation,
+    *,
+    actor: str,
 ) -> None:
     try:
         for trace in investigation.tool_trace:
@@ -376,7 +383,7 @@ async def _audit_investigation(
                 session,
                 batch_id=investigation.batch_id,
                 event_type=AuditEventType.ai_tool_called,
-                actor="ai",
+                actor=actor,
                 entity_type="reconciliation_exception",
                 entity_id=investigation.exception_id,
                 summary=f"AI read-only tool {trace.get('tool', 'unknown')} called",
@@ -386,7 +393,7 @@ async def _audit_investigation(
             session,
             batch_id=investigation.batch_id,
             event_type=AuditEventType.ai_recommendation,
-            actor="ai",
+            actor=actor,
             entity_type="reconciliation_exception",
             entity_id=investigation.exception_id,
             summary="AI advisory recommendation recorded",
@@ -410,7 +417,9 @@ async def investigate_exception(
     exception_id: UUID,
     provider: InvestigationProvider | None = None,
     tools: ToolExecutor | None = None,
+    actor: str = "ai",
 ) -> AIInvestigation:
+    actor = sanitize_actor(actor)
     exception = await session.get(ReconciliationException, exception_id)
     if exception is None:
         raise ValueError("Reconciliation exception was not found")
@@ -450,7 +459,7 @@ async def investigate_exception(
                 tool_trace=trace,
             )
             await _persist(session, investigation)
-            await _audit_investigation(session, investigation)
+            await _audit_investigation(session, investigation, actor=actor)
             return investigation
         except Exception as error:
             last_error = _error_code(error, candidate)
@@ -471,7 +480,7 @@ async def investigate_exception(
         model=selected_model,
     )
     await _persist(session, investigation)
-    await _audit_investigation(session, investigation)
+    await _audit_investigation(session, investigation, actor=actor)
     return investigation
 
 

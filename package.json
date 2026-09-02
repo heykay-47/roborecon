@@ -9,13 +9,13 @@
     "web": "cd apps/web && npm run dev",
     "web:test": "cd apps/web && npx vitest --run",
     "web:lint": "cd apps/web && npm run lint",
-    "initial-seed": "bash scripts/initial-seed.sh",
+    "demo": "bash scripts/demo-reset.sh",
+    "verify": "bash scripts/verify.sh",
     "dc:up": "docker compose up -d",
     "dc:down": "docker compose down",
     "dc:ps": "docker compose ps",
     "dc:clean": "docker compose down -v",
     "dc:logs:pg": "docker compose logs -f postgres",
-    "dc:logs:n8n": "docker compose logs -f n8n",
     "dc:logs": "docker compose logs -f"
   }
 }

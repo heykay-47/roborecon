@@ -94,7 +94,7 @@ An auto-resolved Match Link that contradicts Ground Truth.
 _Avoid_: Low-confidence match
 
 **Auto-resolution Rate**:
-Evaluation cases closed by deterministic policy divided by all evaluation cases in the Reconciliation Run.
+Matchable Evaluation Cases closed by deterministic policy divided by all matchable Evaluation Cases in the Reconciliation Run.
 _Avoid_: Match rate
 
 **Money Reconciled**:

@@ -17,31 +17,8 @@ services:
       timeout: 5s
       retries: 5
 
-  n8n:
-    image: n8nio/n8n:latest
-    container_name: recon-n8n
-    restart: unless-stopped
-    ports:
-      - "${N8N_PORT:-5678}:5678"
-    environment:
-      DB_TYPE: postgresdb
-      DB_POSTGRESDB_HOST: postgres
-      DB_POSTGRESDB_PORT: 5432
-      DB_POSTGRESDB_DATABASE: ${POSTGRES_DB:-reconciliation}
-      DB_POSTGRESDB_USER: ${POSTGRES_USER:-recon}
-      DB_POSTGRESDB_PASSWORD: ${POSTGRES_PASSWORD:-recon_secret}
-      N8N_BASIC_AUTH_ACTIVE: "true"
-      N8N_BASIC_AUTH_USER: ${N8N_USER:-admin}
-      N8N_BASIC_AUTH_PASSWORD: ${N8N_PASSWORD:-admin}
-      GENERIC_TIMEZONE: ${TIMEZONE:-Europe/Madrid}
-      WEBHOOK_URL: http://localhost:${N8N_PORT:-5678}/
-    volumes:
-      - n8n_data:/home/node/.n8n
-    depends_on:
-      postgres:
-        condition: service_healthy
-
   api:
+    image: roborecon-api
     build:
       context: ./apps/api
     container_name: recon-api
@@ -69,17 +46,22 @@ services:
       AI_MAX_TOOL_ROUNDS: ${AI_MAX_TOOL_ROUNDS:-4}
       AI_MAX_SOURCE_IDS: ${AI_MAX_SOURCE_IDS:-10}
       AI_MAX_TOOL_ROWS: ${AI_MAX_TOOL_ROWS:-100}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
     depends_on:
       postgres:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 10s
 
   api-test:
     profiles: ["test"]
-    build:
-      context: ./apps/api
+    image: roborecon-api
     environment:
+      PYTHONPATH: /app:/app/tests
       POSTGRES_HOST: postgres
       POSTGRES_PORT: 5432
       POSTGRES_DB: ${POSTGRES_DB:-reconciliation}
@@ -100,7 +82,6 @@ services:
       AI_MAX_TOOL_ROUNDS: ${AI_MAX_TOOL_ROUNDS:-4}
       AI_MAX_SOURCE_IDS: ${AI_MAX_SOURCE_IDS:-10}
       AI_MAX_TOOL_ROWS: ${AI_MAX_TOOL_ROWS:-100}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
     command: ["python", "-m", "pytest", "-q"]
     depends_on:
@@ -117,8 +98,14 @@ services:
     ports:
       - "${WEB_PORT:-3000}:80"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1/"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+      start_period: 5s
 
 volumes:
   postgres_data:
-  n8n_data:

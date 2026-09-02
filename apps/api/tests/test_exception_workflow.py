@@ -1,4 +1,5 @@
 import copy
+from datetime import datetime, timezone
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
@@ -82,6 +83,7 @@ def _review_context(*, status=ExceptionStatus.open):
         source_id=result.primary_source_id,
         amount=result.amount,
         message="Deterministic outcome requires review: ambiguous.",
+        created_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
     )
     run = SimpleNamespace(
         id=run_id,
@@ -197,6 +199,26 @@ async def test_audit_append_locks_null_scope_with_transaction_advisory_lock():
     assert event.sequence == 5
     assert session.execute.await_count == 2
     assert "pg_advisory_xact_lock" in str(session.execute.call_args_list[0].args[0])
+
+
+@pytest.mark.asyncio
+async def test_audit_listing_applies_event_type_filter_in_sql():
+    from app.audit.service import list_events
+    from app.common.enums import AuditEventType
+
+    count_result = MagicMock(scalar=lambda: 1)
+    rows_result = MagicMock(scalars=lambda: MagicMock(all=lambda: []))
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_result, rows_result])
+
+    rows, total = await list_events(
+        session,
+        event_type=AuditEventType.ai_recommendation,
+    )
+
+    assert rows == []
+    assert total == 1
+    assert "audit_events.event_type" in str(session.execute.call_args_list[0].args[0])
 
 
 @pytest.mark.asyncio

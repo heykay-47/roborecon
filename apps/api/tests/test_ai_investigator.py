@@ -307,6 +307,29 @@ async def test_valid_provider_recommendation_preserves_citations():
 
 
 @pytest.mark.asyncio
+async def test_investigation_audit_events_use_sanitized_request_actor(monkeypatch):
+    session, exception, _, _ = _session()
+    provider = _FakeProvider(
+        ProviderRecommendation(
+            recommendation="Review the cited deterministic evidence.",
+            citations=[Citation(source_type="ledger", source_id=SOURCE_ID)],
+        )
+    )
+    append_event = AsyncMock()
+    monkeypatch.setattr(investigator_module.audit_service, "append_event", append_event)
+
+    await investigate_exception(
+        session,
+        exception.id,
+        provider=provider,
+        actor=" analyst-7 ",
+    )
+
+    append_event.assert_awaited_once()
+    assert append_event.await_args.kwargs["actor"] == "analyst-7"
+
+
+@pytest.mark.asyncio
 async def test_invalid_provider_citation_falls_back():
     session, exception, _, _ = _session()
     provider = _FakeProvider(

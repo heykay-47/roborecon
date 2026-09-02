@@ -152,12 +152,18 @@ class ExceptionResponse(ApiModel):
     review_note: str | None = None
     reviewed_by: str | None = None
     reviewed_at: datetime | None = None
+    created_at: datetime
+    ai_ready: bool = True
 
 
 class ReviewRequest(ApiModel):
     action: ReviewAction
     candidate_id: UUID | None = Field(default=None, serialization_alias="candidateId")
     note: str | None = Field(default=None, max_length=4000)
+    actor: str = Field(default="human", min_length=1, max_length=100)
+
+
+class InvestigationRequest(ApiModel):
     actor: str = Field(default="human", min_length=1, max_length=100)
 
 

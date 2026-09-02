@@ -4,7 +4,6 @@ from app.common.enums import ResultStatus
 from app.common.money import calculate_fee, calculate_gst
 from app.demo.dataset import build_demo_dataset
 
-
 EXPECTED_PRIMARY_CLASSES = {
     "standard": 20,
     "exact_id": 6,

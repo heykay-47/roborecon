@@ -4,7 +4,6 @@ import os
 os.environ.setdefault("POSTGRES_DB", "test")
 os.environ.setdefault("POSTGRES_USER", "test")
 os.environ.setdefault("POSTGRES_PASSWORD", "test")
-os.environ.setdefault("ANTHROPIC_API_KEY", "test-key")
 
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock
@@ -45,9 +44,6 @@ def _make_mock_session():
         one.avg_confidence = None
         one.min_confidence = 0
         one.max_confidence = 0
-        one.stripe = 0
-        one.paypal = 0
-        one.bank = 0
         result.one.return_value = one
 
         return result
@@ -121,15 +117,7 @@ async def summary_client():
     conf_one.max_confidence = 100
     confidence_result.one.return_value = conf_one
 
-    # Call 4 — provider counts (stripe / paypal / bank)
-    provider_result = MagicMock()
-    prov_one = MagicMock()
-    prov_one.stripe = 5
-    prov_one.paypal = 3
-    prov_one.bank = 2
-    provider_result.one.return_value = prov_one
-
-    # Call 5 — missing external count (scalar)
+    # Call 4 — missing external count (scalar)
     missing_result = MagicMock()
     missing_result.scalar.return_value = 1
 
@@ -137,7 +125,6 @@ async def summary_client():
         status_result,
         amounts_result,
         confidence_result,
-        provider_result,
         missing_result,
     ])
 

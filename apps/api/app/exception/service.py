@@ -473,8 +473,17 @@ async def get_exception_detail(
             if item.get("observed_values", item.get("observedValues"))
         ],
     }
+    exception_response = ExceptionResponse.model_validate(exception).model_copy(
+        update={
+            "ai_ready": (
+                getattr(exception.status, "value", exception.status)
+                == ExceptionStatus.open.value
+                and not investigations
+            )
+        }
+    )
     return ExceptionDetailResponse(
-        **ExceptionResponse.model_validate(exception).model_dump(),
+        **exception_response.model_dump(),
         result=(
             None
             if result is None

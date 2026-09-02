@@ -1,6 +1,7 @@
 import {
   paymentStatusStyles,
   reconciliationStatusStyles,
+  statusClass,
 } from "@/lib/status-colors";
 
 describe("reconciliationStatusStyles", () => {
@@ -61,5 +62,14 @@ describe("paymentStatusStyles", () => {
     const values = Object.values(paymentStatusStyles);
     const unique = new Set(values);
     expect(unique.size).toBe(values.length);
+  });
+});
+
+describe("transaction status colors", () => {
+  it("maps provider and autonomous states to semantic dark-theme colors", () => {
+    expect(statusClass("paid")).toContain("text-emerald-300");
+    expect(statusClass("processed")).toContain("text-cyan-200");
+    expect(statusClass("partially_refunded")).toContain("text-amber-200");
+    expect(statusClass("autonomous")).toContain("text-emerald-300");
   });
 });

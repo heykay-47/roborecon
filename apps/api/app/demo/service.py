@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.model import AIInvestigationRecord
 from app.audit import service as audit_service
 from app.audit.model import AuditEvent
 from app.batch.model import Batch, IngestionRecord
@@ -15,9 +16,19 @@ from app.demo.source_service import source_counts as _source_counts
 from app.evaluation.model import EvaluationCase, GroundTruthLink
 from app.ledger.model import LedgerEntry
 from app.razorpay.model import RazorpayOrder, RazorpayPayment, RazorpayRefund
+from app.reconciliation.model import (
+    MatchLink,
+    ReconciliationException,
+    ReconciliationResult,
+    ReconciliationRun,
+)
 from app.settlement.model import BankCredit, Settlement, SettlementLine
 
 ROBORECON_TABLES = (
+    AIInvestigationRecord,
+    MatchLink,
+    ReconciliationException,
+    ReconciliationResult,
     GroundTruthLink,
     EvaluationCase,
     AuditEvent,
@@ -29,6 +40,7 @@ ROBORECON_TABLES = (
     RazorpayOrder,
     LedgerEntry,
     IngestionRecord,
+    ReconciliationRun,
     Batch,
 )
 

@@ -1,3 +1,5 @@
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
+
 from pydantic import AliasChoices, Field
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
@@ -30,7 +32,6 @@ class Settings(BaseSettings):
     ai_max_tool_rounds: int = Field(default=4, ge=1, le=4)
     ai_max_source_ids: int = Field(default=10, ge=1, le=10)
     ai_max_tool_rows: int = Field(default=100, ge=1, le=1000)
-    anthropic_api_key: str | None = None
     cors_origins: str = "http://localhost:5173"
 
     @property
@@ -42,30 +43,22 @@ class Settings(BaseSettings):
             f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
         )
 
-    @property
-    def sync_database_url(self) -> str:
-        """Synchronous DB URL for LangChain (it doesn't support async)."""
-        if self.database_url_override:
-            url = self.database_url_override
-            if url.startswith("postgresql+asyncpg://"):
-                return url.replace("postgresql+asyncpg://", "postgresql+psycopg2://", 1)
-            if url.startswith("postgresql://"):
-                return url.replace("postgresql://", "postgresql+psycopg2://", 1)
-            if url.startswith("postgres://"):
-                return url.replace("postgres://", "postgresql+psycopg2://", 1)
-            return url
-        return (
-            f"postgresql+psycopg2://{self.postgres_user}:{self.postgres_password}"
-            f"@{self.postgres_host}:{self.postgres_port}/{self.postgres_db}"
-        )
-
     @staticmethod
     def _async_driver_url(url: str) -> str:
         if url.startswith("postgresql://"):
-            return url.replace("postgresql://", "postgresql+asyncpg://", 1)
-        if url.startswith("postgres://"):
-            return url.replace("postgres://", "postgresql+asyncpg://", 1)
-        return url
+            url = url.replace("postgresql://", "postgresql+asyncpg://", 1)
+        elif url.startswith("postgres://"):
+            url = url.replace("postgres://", "postgresql+asyncpg://", 1)
+
+        parsed = urlsplit(url)
+        query = []
+        for key, value in parse_qsl(parsed.query, keep_blank_values=True):
+            if key == "channel_binding":
+                continue
+            if key == "sslmode":
+                key = "ssl"
+            query.append((key, value))
+        return urlunsplit(parsed._replace(query=urlencode(query)))
 
     model_config = SettingsConfigDict(
         env_file="../../.env",

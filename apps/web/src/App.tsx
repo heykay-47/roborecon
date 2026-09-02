@@ -1,23 +1,38 @@
-import { BrowserRouter, Routes, Route } from "react-router-dom";
+import { lazy, Suspense } from "react";
+import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { Layout } from "@/components/layout";
-import { DashboardPage } from "@/pages/dashboard";
-import { TransactionsPage } from "@/pages/transactions";
-import { ReconciliationsPage } from "@/pages/reconciliations";
-import { ReconciliationDetailPage } from "@/pages/reconciliation-detail";
-import { AskPage } from "@/pages/ask";
+import { PageState } from "@/components/page-state";
+import { NotFoundPage } from "@/pages/not-found";
+
+const OverviewPage = lazy(() => import("@/pages/overview"));
+const ExceptionDetailPage = lazy(() => import("@/pages/exception-detail"));
+const ExceptionsPage = lazy(() => import("@/pages/exceptions"));
+const RunDetailPage = lazy(() => import("@/pages/run-detail"));
+const RunsPage = lazy(() => import("@/pages/runs"));
+const TransactionsPage = lazy(() => import("@/pages/transactions"));
+const AuditPage = lazy(() => import("@/pages/audit"));
+const CopilotPage = lazy(() => import("@/pages/copilot"));
+const SettingsPage = lazy(() => import("@/pages/settings"));
 
 function App() {
   return (
     <BrowserRouter>
-      <Routes>
-        <Route element={<Layout />}>
-          <Route path="/" element={<DashboardPage />} />
-          <Route path="/transactions" element={<TransactionsPage />} />
-          <Route path="/reconciliations" element={<ReconciliationsPage />} />
-          <Route path="/reconciliations/:id" element={<ReconciliationDetailPage />} />
-          <Route path="/ask" element={<AskPage />} />
-        </Route>
-      </Routes>
+      <Suspense fallback={<PageState kind="loading" headingLevel="h1" title="Loading workspace" description="Preparing the operational surface." />}>
+        <Routes>
+          <Route element={<Layout />}>
+            <Route path="/" element={<OverviewPage />} />
+            <Route path="/runs" element={<RunsPage />} />
+            <Route path="/runs/:runId" element={<RunDetailPage />} />
+            <Route path="/transactions" element={<TransactionsPage />} />
+            <Route path="/exceptions" element={<ExceptionsPage />} />
+            <Route path="/exceptions/:exceptionId" element={<ExceptionDetailPage />} />
+            <Route path="/audit" element={<AuditPage />} />
+            <Route path="/copilot" element={<CopilotPage />} />
+            <Route path="/settings" element={<SettingsPage />} />
+            <Route path="*" element={<NotFoundPage title="Page not found" description="This route is not part of the current workspace." />} />
+          </Route>
+        </Routes>
+      </Suspense>
     </BrowserRouter>
   );
 }

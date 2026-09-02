@@ -903,7 +903,8 @@ def _settlement_facts(
             },
             50 if not contradictions else 0,
             "pass" if not contradictions else "fail",
-            "Settlement net equals captured credits less debits plus release and adjustment values.",
+            "Settlement net equals captured credits less debits plus release and "
+            "adjustment values.",
         ),
     )
     return _SettlementFacts(
@@ -954,7 +955,13 @@ def _bank_match(
                 "Bank credit was selected by exact UTR before amount/date evidence.",
             )
         ]
-        return selected, True, len(exact) == 1 and not contradictions, evidence, tuple(contradictions)
+        return (
+            selected,
+            True,
+            len(exact) == 1 and not contradictions,
+            evidence,
+            tuple(contradictions),
+        )
 
     eligible = [
         credit
@@ -1088,6 +1095,9 @@ def _stage_b_candidate(
         current_line.amount != current_payment.amount for current_line in payment_lines
     ):
         contradictions.append("payment_amount_contradiction")
+    payment_line_consistent = bool(payment_lines) and (
+        "payment_amount_contradiction" not in contradictions
+    )
     evidence.append(
         _evidence(
             "CAPTURED_PAYMENT",
@@ -1096,8 +1106,8 @@ def _stage_b_candidate(
                 "reported_amount": current_payment.amount,
                 "line_amounts": [current_line.amount for current_line in payment_lines],
             },
-            10 if payment_lines and "payment_amount_contradiction" not in contradictions else 0,
-            "pass" if payment_lines and "payment_amount_contradiction" not in contradictions else "fail",
+            10 if payment_line_consistent else 0,
+            "pass" if payment_line_consistent else "fail",
             "Captured payment credit is linked by provider payment ID.",
         )
     )
@@ -1148,6 +1158,9 @@ def _stage_b_candidate(
         ):
             contradictions.append("refund_amount_contradiction")
     if payment_refunds:
+        refund_is_consistent = not any(
+            "refund_amount_contradiction" in item for item in contradictions
+        )
         evidence.append(
             _evidence(
                 "REFUND_DIRECTION",
@@ -1164,8 +1177,8 @@ def _stage_b_candidate(
                         )
                     ],
                 },
-                0 if any("refund_amount_contradiction" in item for item in contradictions) else 10,
-                "fail" if any("refund_amount_contradiction" in item for item in contradictions) else "pass",
+                10 if refund_is_consistent else 0,
+                "pass" if refund_is_consistent else "fail",
                 "Refund source amounts must be represented as negative settlement debits.",
             )
         )

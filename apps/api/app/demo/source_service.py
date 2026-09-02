@@ -107,6 +107,7 @@ async def persist_source_records(
             for settlement in snapshot.settlements
         ]
     )
+    await session.flush()
     session.add_all(
         [
             SettlementLine(
