@@ -1,8 +1,15 @@
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryRouter } from "react-router-dom";
 import { Layout } from "@/components/layout";
+import { THEME_STORAGE_KEY } from "@/hooks/use-theme";
 
 describe("Layout", () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+    document.documentElement.classList.remove("dark");
+    delete document.documentElement.dataset.theme;
+  });
+
   it("keeps Roborecon branding and exposes all seven destinations on mobile", () => {
     render(
       <MemoryRouter>
@@ -11,6 +18,7 @@ describe("Layout", () => {
     );
 
     expect(screen.getByText("Roborecon")).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Workspace navigation" })).toBeInTheDocument();
     const toggle = screen.getByRole("button", { name: "Toggle navigation" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
 
@@ -84,5 +92,38 @@ describe("Layout", () => {
     fireEvent.keyDown(window, { key: "Escape" });
     await waitFor(() => expect(toggle).toHaveAttribute("aria-expanded", "false"));
     expect(toggle).toHaveFocus();
+  });
+
+  it("defaults to dark mode and persists the selected theme", async () => {
+    render(
+      <MemoryRouter>
+        <Layout />
+      </MemoryRouter>,
+    );
+
+    const themeToggle = screen.getByRole("button", { name: "Switch to light mode" });
+    await waitFor(() => expect(document.documentElement).toHaveClass("dark"));
+    expect(themeToggle).toHaveAttribute("aria-pressed", "true");
+
+    fireEvent.click(themeToggle);
+
+    await waitFor(() => expect(document.documentElement).not.toHaveClass("dark"));
+    expect(screen.getByRole("button", { name: "Switch to dark mode" })).toHaveAttribute("aria-pressed", "false");
+    expect(document.documentElement.dataset.theme).toBe("light");
+    expect(window.localStorage.getItem(THEME_STORAGE_KEY)).toBe("light");
+  });
+
+  it("restores a saved light mode", async () => {
+    window.localStorage.setItem(THEME_STORAGE_KEY, "light");
+
+    render(
+      <MemoryRouter>
+        <Layout />
+      </MemoryRouter>,
+    );
+
+    expect(screen.getByRole("button", { name: "Switch to dark mode" })).toHaveAttribute("aria-pressed", "false");
+    await waitFor(() => expect(document.documentElement).not.toHaveClass("dark"));
+    expect(document.documentElement.dataset.theme).toBe("light");
   });
 });

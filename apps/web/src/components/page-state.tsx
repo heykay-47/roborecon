@@ -21,7 +21,7 @@ export function PageState({ kind, title, description, action, headingLevel = "h2
       aria-live="polite"
     >
       <Icon
-        className={kind === "loading" ? "size-5 animate-spin text-cyan-300" : "size-5 text-muted-foreground"}
+        className={kind === "loading" ? "size-5 animate-spin text-primary" : "size-5 text-muted-foreground"}
         aria-hidden="true"
       />
       <div>

@@ -189,4 +189,6 @@ async def investigate_exception_endpoint(
             status_code=500,
             detail="The advisory investigation could not be persisted",
         ) from error
-    return AIInvestigationResponse.model_validate(investigation)
+    return AIInvestigationResponse.model_validate(
+        investigation.model_dump(mode="json")
+    )

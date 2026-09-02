@@ -8,9 +8,9 @@ interface MetricCardProps {
 export function MetricCard({ label, value, detail, tone = "default" }: MetricCardProps) {
   const valueClass =
     tone === "positive"
-      ? "text-emerald-300"
+       ? "text-success"
       : tone === "warning"
-        ? "text-amber-200"
+         ? "text-warning"
         : "text-foreground";
 
   return (

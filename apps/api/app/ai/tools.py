@@ -110,12 +110,12 @@ GEMINI_TOOL_DECLARATIONS = [
     {
         "name": "get_run_metrics",
         "description": "Read operational metrics for the current reconciliation run.",
-        "parameters": {"type": "OBJECT", "properties": {}, "additionalProperties": False},
+        "parameters": {"type": "OBJECT", "properties": {}},
     },
     {
         "name": "get_exception_evidence",
         "description": "Read deterministic evidence for the current exception.",
-        "parameters": {"type": "OBJECT", "properties": {}, "additionalProperties": False},
+        "parameters": {"type": "OBJECT", "properties": {}},
     },
     {
         "name": "get_settlement_breakdown",
@@ -126,7 +126,6 @@ GEMINI_TOOL_DECLARATIONS = [
                 "source_ids": {"type": "ARRAY", "items": {"type": "STRING"}},
             },
             "required": ["source_ids"],
-            "additionalProperties": False,
         },
     },
     {
@@ -138,7 +137,6 @@ GEMINI_TOOL_DECLARATIONS = [
                 "source_ids": {"type": "ARRAY", "items": {"type": "STRING"}},
             },
             "required": ["source_ids"],
-            "additionalProperties": False,
         },
     },
 ]
@@ -160,7 +158,10 @@ GROQ_TOOL_DECLARATIONS = [
         "function": {
             "name": item["name"],
             "description": item["description"],
-            "parameters": _openai_schema(item["parameters"]),
+            "parameters": {
+                **_openai_schema(item["parameters"]),
+                "additionalProperties": False,
+            },
             "strict": True,
         },
     }

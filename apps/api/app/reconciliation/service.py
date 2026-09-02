@@ -15,8 +15,10 @@ from app.common.enums import (
     AuditEventType,
     ExceptionStatus,
     ReconciliationStage,
+    ResultStatus,
     RunStatus,
 )
+from app.common.messages import MALFORMED_RECORD_MESSAGE
 from app.database import async_session
 from app.demo.dataset import (
     BankCreditSeed,
@@ -42,6 +44,24 @@ from app.settlement.model import BankCredit, Settlement, SettlementLine
 
 class RunAlreadyRunning(RuntimeError):
     """Raised when a batch already has an active deterministic run."""
+
+
+_EXCEPTION_MESSAGES: dict[ResultStatus, str] = {
+    ResultStatus.matched: "A possible match was found, but it needs review.",
+    ResultStatus.ambiguous: "More than one possible match was found. Review the evidence.",
+    ResultStatus.duplicate: "More than one source record matched. Review the evidence.",
+    ResultStatus.missing_razorpay: "No matching Razorpay record was found.",
+    ResultStatus.missing_ledger: "No matching ledger record was found.",
+    ResultStatus.missing_settlement: "No matching settlement was found.",
+    ResultStatus.missing_bank_credit: "No matching bank credit was found.",
+    ResultStatus.amount_mismatch: "The amounts do not match. Review the evidence.",
+    ResultStatus.malformed: MALFORMED_RECORD_MESSAGE,
+    ResultStatus.confirmed_no_match: "No match was confirmed. Review the evidence.",
+}
+
+
+def _exception_message(status: ResultStatus) -> str:
+    return _EXCEPTION_MESSAGES.get(status, "This result needs review. Check the evidence.")
 
 
 def _jsonable(value: Any) -> Any:
@@ -338,9 +358,7 @@ def _add_links_and_exception(
                 source_type=result.primary_source_type,
                 source_id=result.primary_source_id,
                 amount=result.amount,
-                message=(
-                    f"Deterministic outcome requires review: {outcome.status.value}."
-                ),
+                message=_exception_message(outcome.status),
             )
         )
 
@@ -498,7 +516,7 @@ async def run_reconciliation(
                         source_type="quarantine",
                         source_id=None,
                         amount=None,
-                        message="Malformed source row was quarantined before matching.",
+                         message=_exception_message(ResultStatus.malformed),
                     )
                 )
 

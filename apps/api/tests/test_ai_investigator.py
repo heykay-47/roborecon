@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
@@ -684,7 +685,10 @@ async def test_gemini_429_is_reported_without_response_body():
 
 @pytest.mark.asyncio
 async def test_gemini_malformed_json_is_rejected():
-    async def handler(_request):
+    async def handler(request):
+        payload = json.loads(request.content)
+        assert "generationConfig" not in payload
+        assert "one raw JSON object" in payload["contents"][0]["parts"][0]["text"]
         return httpx.Response(
             200,
             json={"candidates": [{"content": {"parts": [{"text": "not-json"}]}}]},
@@ -702,4 +706,43 @@ async def test_gemini_malformed_json_is_rejected():
         ))
 
     assert error.value.code == "malformed_response"
+    await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_gemini_prefers_function_call_after_reasoning_text():
+    async def handler(_request):
+        return httpx.Response(
+            200,
+            json={
+                "candidates": [{
+                    "content": {
+                        "parts": [
+                            {"text": "I should inspect the evidence first."},
+                            {
+                                "functionCall": {
+                                    "name": "get_exception_evidence",
+                                    "args": {},
+                                    "id": "call-1",
+                                }
+                            },
+                        ]
+                    }
+                }]
+            },
+        )
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = GeminiProvider(api_key="test-key", model="gemma-test", client=client)
+
+    recommendation = await provider.investigate(InvestigationContext(
+        exception_id=EXCEPTION_ID,
+        batch_id=BATCH_ID,
+        run_id=RUN_ID,
+        exception_type="duplicate",
+    ))
+
+    assert recommendation.tool_request == ToolRequest(
+        tool="get_exception_evidence", arguments={}, call_id="call-1"
+    )
     await client.aclose()

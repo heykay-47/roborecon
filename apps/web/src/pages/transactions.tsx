@@ -13,8 +13,10 @@ import { formatDateTime, formatInr, formatInteger } from "@/lib/format";
 import { humanizeStatus } from "@/lib/status-colors";
 import type { TransactionRecord } from "@/types/api";
 
+const MALFORMED_RECORD_MESSAGE = "This source record could not be read. Review the source data.";
+
 const sourceTypes = [
-  ["", "All source types"],
+  ["", "All record types"],
   ["ledger", "Ledger"],
   ["razorpay_order", "Razorpay order"],
   ["razorpay_payment", "Razorpay payment"],
@@ -22,7 +24,7 @@ const sourceTypes = [
   ["settlement", "Settlement"],
   ["settlement_line", "Settlement line"],
   ["bank_credit", "Bank credit"],
-  ["quarantine", "Quarantine"],
+  ["quarantine", "Needs attention"],
 ] as const;
 
 const statuses = [
@@ -48,7 +50,7 @@ const statuses = [
 ] as const;
 
 const reconciliationStates = [
-  ["", "All reconciliation states"],
+  ["", "All match states"],
   ["matched", "Matched"],
   ["unreconciled", "Unreconciled"],
   ["open", "Open"],
@@ -58,12 +60,12 @@ const reconciliationStates = [
 
 function RelationshipLinks({ row }: { row: TransactionRecord }) {
   const links = [
-    row.runId ? <Link key="run" to={`/runs/${row.runId}`} className="text-cyan-200 hover:text-cyan-100">Run {row.runId}</Link> : null,
-    row.resultId && row.runId ? <Link key="result" to={`/runs/${row.runId}#result-${row.resultId}`} className="text-cyan-200 hover:text-cyan-100">Result {row.resultId}</Link> : null,
-    row.exceptionId ? <Link key="exception" to={`/exceptions/${row.exceptionId}`} className="text-amber-200 hover:text-amber-100">Exception {row.exceptionId}</Link> : null,
+    row.runId ? <Link key="run" to={`/runs/${row.runId}`} className="text-primary hover:text-primary/80">Run {row.runId}</Link> : null,
+    row.resultId && row.runId ? <Link key="result" to={`/runs/${row.runId}#result-${row.resultId}`} className="text-primary hover:text-primary/80">Result {row.resultId}</Link> : null,
+    row.exceptionId ? <Link key="exception" to={`/exceptions/${row.exceptionId}`} className="text-warning hover:text-warning/80">Exception {row.exceptionId}</Link> : null,
   ].filter((link) => link !== null);
 
-  return links.length > 0 ? <div className="flex flex-col gap-1 text-xs">{links}</div> : <span className="text-xs text-muted-foreground">None</span>;
+  return links.length > 0 ? <div className="flex flex-col gap-1 text-xs">{links}</div> : <span className="text-xs text-muted-foreground">No linked evidence</span>;
 }
 
 const columns: ColumnDef<TransactionRecord, unknown>[] = [
@@ -77,11 +79,11 @@ const columns: ColumnDef<TransactionRecord, unknown>[] = [
         <div className="min-w-44">
           <div className="flex flex-wrap items-center gap-2">
             <span className="font-medium text-foreground">{humanizeStatus(transaction.sourceType)}</span>
-            {malformed && <span className="rounded border border-rose-400/30 bg-rose-400/10 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.1em] text-rose-200">Malformed row</span>}
+            {malformed && <span className="rounded border border-danger/30 bg-danger/10 px-1.5 py-0.5 text-[0.65rem] font-semibold uppercase tracking-[0.1em] text-danger">Invalid row</span>}
           </div>
-          <p className="mt-1 font-mono text-xs text-muted-foreground">{transaction.sourceId ?? "No canonical ID"}</p>
-          <p className="mt-1 text-xs text-cyan-200">{transaction.reference ?? "No reference"}</p>
-          {transaction.parseError && <p className="mt-1 max-w-xs text-xs text-rose-200">{transaction.parseError}</p>}
+          <p className="mt-1 font-mono text-xs text-muted-foreground">{transaction.sourceId ?? "No record ID"}</p>
+           <p className="mt-1 text-xs text-primary">{transaction.reference ?? "No reference"}</p>
+            {malformed && <p className="mt-1 max-w-xs text-xs text-danger">{MALFORMED_RECORD_MESSAGE}</p>}
         </div>
       );
     },
@@ -128,16 +130,16 @@ export function TransactionsPage() {
   };
 
   if (transactions.isLoading) {
-    return <PageState kind="loading" headingLevel="h1" title="Loading transactions" description="Reading source records from the selected batch." />;
+    return <PageState kind="loading" headingLevel="h1" title="Loading records…" description="Getting records from the selected batch." />;
   }
 
   if (transactions.isError) {
-    return <PageState kind="error" headingLevel="h1" title="Unable to load transactions" description={transactions.error.message} action={<RetryButton onClick={() => void transactions.refetch()} />} />;
+    return <PageState kind="error" headingLevel="h1" title="Could not load records" description={transactions.error.message} action={<RetryButton onClick={() => void transactions.refetch()} />} />;
   }
 
   const data = transactions.data;
   if (!data) {
-    return <PageState kind="error" headingLevel="h1" title="Transaction data is unavailable" description="The API returned no transaction payload." />;
+    return <PageState kind="error" headingLevel="h1" title="Records are not available" description="No records were returned." />;
   }
 
   const displayData = data;
@@ -148,16 +150,16 @@ export function TransactionsPage() {
       <div className="flex flex-col justify-between gap-3 border-b border-border pb-6 sm:flex-row sm:items-end">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Transactions</h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">A unified source ledger with server-side filtering and links back to evidence.</p>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">All payment records in one place, with filters and links to evidence.</p>
         </div>
         <p className="font-mono text-xs text-muted-foreground">{formatInteger(displayData.total)} records</p>
       </div>
 
-      {citationSourceId && <p className="rounded-lg border border-cyan-300/20 bg-cyan-300/5 p-3 text-xs text-cyan-100" role="status">Citation target: <span className="font-mono">{citationSourceId}</span>. Showing the returned record when it is present in this batch.</p>}
+       {citationSourceId && <p className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-primary" role="status">Source record: <span className="font-mono">{citationSourceId}</span>. Showing it if it is in this batch.</p>}
 
-      <section className="grid gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-3" aria-label="Transaction filters">
+      <section className="grid gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-3" aria-label="Record filters">
         <label className="space-y-1.5 text-xs font-medium text-muted-foreground" htmlFor="source-type">
-          Source type
+          Record type
           <Select id="source-type" value={filters.sourceType ?? ""} onChange={(event) => updateFilter("sourceType", event.target.value)}>
             {sourceTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </Select>
@@ -169,7 +171,7 @@ export function TransactionsPage() {
           </Select>
         </label>
         <label className="space-y-1.5 text-xs font-medium text-muted-foreground" htmlFor="reconciliation-state">
-          Reconciliation state
+          Match state
           <Select id="reconciliation-state" value={filters.reconciliationState ?? ""} onChange={(event) => updateFilter("reconciliationState", event.target.value)}>
             {reconciliationStates.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </Select>
@@ -178,10 +180,10 @@ export function TransactionsPage() {
 
       <Card>
         <CardHeader className="flex-row items-center justify-between">
-          <CardTitle className="text-sm font-medium">Source records</CardTitle>
+          <CardTitle className="text-sm font-medium">Payment records</CardTitle>
           {transactions.isFetching && !transactions.isLoading && (
-            <span role="status" aria-label="Updating transactions" className="text-xs text-cyan-200">
-              Updating transactions...
+             <span role="status" aria-label="Updating records…" className="text-xs text-primary">
+               Updating records…
             </span>
           )}
         </CardHeader>
@@ -190,7 +192,7 @@ export function TransactionsPage() {
             data={displayData.items}
             columns={columns}
             getRowId={(row, index) => row.sourceId ?? `${row.sourceType}-${row.reference ?? "row"}-${index}`}
-            emptyMessage={citationSourceId ? "The cited source is not present in the returned batch." : "No transactions match these filters."}
+            emptyMessage={citationSourceId ? "This source record is not in the batch." : "No records match these filters."}
           />
           <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
             <span className="text-xs text-muted-foreground">Page {page} of {totalPages} · {formatInteger(displayData.total)} records</span>

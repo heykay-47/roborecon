@@ -31,7 +31,7 @@ export function RecordSummary({
           {sourceType && <Badge variant="outline">{humanizeStatus(sourceType)}</Badge>}
         </CardTitle>
         <p className="break-all font-mono text-[0.7rem] text-muted-foreground">
-          {sourceId ?? "No canonical ID"}
+          {sourceId ?? "No record ID"}
         </p>
       </CardHeader>
       <CardContent>
@@ -49,7 +49,7 @@ export function RecordSummary({
             ))}
           </dl>
         ) : (
-          <p className="text-sm text-muted-foreground">No source fields were returned.</p>
+          <p className="text-sm text-muted-foreground">No record details were returned.</p>
         )}
       </CardContent>
     </Card>
@@ -61,21 +61,21 @@ export function CandidateEvidence({ candidate }: { candidate: ScoredCandidate })
     <div className="rounded-lg border border-border bg-background/30 p-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <p className="text-sm font-medium text-foreground">Candidate</p>
+          <p className="text-sm font-medium text-foreground">Possible match</p>
           <p className="mt-1 break-all font-mono text-xs text-muted-foreground">{candidate.candidateId}</p>
         </div>
         <div className="text-right font-mono tabular-nums">
-          <p className="text-lg font-semibold text-cyan-200">{candidate.score}</p>
-          <p className="text-[0.65rem] uppercase tracking-[0.12em] text-muted-foreground">score</p>
+           <p className="text-lg font-semibold text-primary">{candidate.score}</p>
+          <p className="text-[0.65rem] uppercase tracking-[0.12em] text-muted-foreground">Score</p>
         </div>
       </div>
       <div className="mt-3 flex flex-wrap gap-1.5 text-[0.68rem]">
-        {candidate.exactIdentifierChain && <Badge variant="outline" className="text-emerald-200">Exact chain</Badge>}
-        {candidate.verifiedSettlementMath && <Badge variant="outline" className="text-emerald-200">Math verified</Badge>}
-        {candidate.duplicate && <Badge variant="outline" className="text-rose-200">Duplicate</Badge>}
+          {candidate.exactIdentifierChain && <Badge variant="outline" className="text-success">Exact ID chain</Badge>}
+          {candidate.verifiedSettlementMath && <Badge variant="outline" className="text-success">Settlement math verified</Badge>}
+         {candidate.duplicate && <Badge variant="outline" className="text-danger">Duplicate</Badge>}
       </div>
       {candidate.contradictions.length > 0 && (
-        <ul className="mt-3 space-y-1 text-xs text-rose-200">
+         <ul className="mt-3 space-y-1 text-xs text-danger">
           {candidate.contradictions.map((contradiction) => <li key={contradiction}>{contradiction}</li>)}
         </ul>
       )}
@@ -85,7 +85,7 @@ export function CandidateEvidence({ candidate }: { candidate: ScoredCandidate })
 
 export function CriterionEvidenceList({ evidence }: { evidence: CriterionEvidence[] }) {
   if (evidence.length === 0) {
-    return <p className="text-sm text-muted-foreground">No criterion evidence was persisted.</p>;
+    return <p className="text-sm text-muted-foreground">No score details were saved.</p>;
   }
 
   return (
@@ -93,14 +93,14 @@ export function CriterionEvidenceList({ evidence }: { evidence: CriterionEvidenc
       {evidence.map((item, index) => (
         <div key={`${item.ruleCode}-${index}`} className="grid gap-2 rounded-lg border border-border bg-background/30 p-3 md:grid-cols-[9rem_5rem_1fr] md:items-start">
           <div>
-            <p className="font-mono text-xs font-semibold text-cyan-200">{item.ruleCode}</p>
+             <p className="font-mono text-xs font-semibold text-primary">{item.ruleCode}</p>
             <p className="mt-1 text-xs text-muted-foreground">{humanizeStatus(item.result)}</p>
           </div>
-          <p className="font-mono text-sm tabular-nums text-foreground">{item.points > 0 ? `+${item.points}` : item.points} pts</p>
+            <p className="font-mono text-sm tabular-nums text-foreground">{item.points > 0 ? `+${item.points}` : item.points} points</p>
           <div>
             <p className="text-sm leading-5 text-foreground">{item.explanation}</p>
             <p className="mt-2 break-words font-mono text-[0.7rem] leading-5 text-muted-foreground">
-              Observed: {valueToText(item.observedValues)}
+              Values checked: {valueToText(item.observedValues)}
             </p>
           </div>
         </div>
@@ -118,21 +118,21 @@ export function ScoreSummary({
   return (
     <dl className="grid gap-3 sm:grid-cols-4">
       <div className="rounded-lg border border-border bg-background/30 p-3">
-        <dt className="text-xs text-muted-foreground">Top score</dt>
-        <dd className="mt-1 font-mono text-xl font-semibold tabular-nums text-cyan-200">{score}</dd>
+        <dt className="text-xs text-muted-foreground">Best score</dt>
+         <dd className="mt-1 font-mono text-xl font-semibold tabular-nums text-primary">{score}</dd>
       </div>
       <div className="rounded-lg border border-border bg-background/30 p-3">
-        <dt className="text-xs text-muted-foreground">Runner-up</dt>
+        <dt className="text-xs text-muted-foreground">Second-best score</dt>
         <dd className="mt-1 font-mono text-xl font-semibold tabular-nums">{runnerUpScore}</dd>
       </div>
       <div className="rounded-lg border border-border bg-background/30 p-3">
-        <dt className="text-xs text-muted-foreground">Margin</dt>
+        <dt className="text-xs text-muted-foreground">Score gap</dt>
         <dd className="mt-1 font-mono text-xl font-semibold tabular-nums">{margin}</dd>
       </div>
       <div className="rounded-lg border border-border bg-background/30 p-3">
-        <dt className="text-xs text-muted-foreground">Policy authority</dt>
-        <dd className={autonomous ? "mt-1 text-sm font-medium text-emerald-300" : "mt-1 text-sm font-medium text-amber-200"}>
-          {autonomous ? "Autonomous" : "Review required"}
+        <dt className="text-xs text-muted-foreground">Match decision</dt>
+         <dd className={autonomous ? "mt-1 text-sm font-medium text-success" : "mt-1 text-sm font-medium text-warning"}>
+          {autonomous ? "Automatic" : "Needs review"}
         </dd>
       </div>
     </dl>
@@ -145,21 +145,21 @@ export function InvestigationTrace({ investigation }: { investigation: AIInvesti
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
-            <h3 className="text-sm font-medium">Advisory investigation</h3>
-            <Badge variant="outline" className={investigation.mode === "deterministicFallback" ? "text-amber-200" : "text-cyan-200"}>
-              {investigation.mode === "deterministicFallback" ? "Deterministic fallback" : humanizeStatus(investigation.mode)}
+            <h3 className="text-sm font-medium">AI investigation</h3>
+             <Badge variant="outline" className={investigation.mode === "deterministicFallback" ? "text-warning" : "text-primary"}>
+              {investigation.mode === "deterministicFallback" ? "Rules-based fallback" : humanizeStatus(investigation.mode)}
             </Badge>
           </div>
           <p className="mt-1 text-xs text-muted-foreground">
-            {investigation.provider ?? "No provider"}{investigation.model ? ` · ${investigation.model}` : ""} · confidence {investigation.confidence}%
+            {investigation.provider ?? "No provider"}{investigation.model ? ` · ${investigation.model}` : ""} · {investigation.confidence}% confidence
           </p>
         </div>
-        {investigation.errorCode && <span className="text-xs text-rose-200">{investigation.errorCode}</span>}
+         {investigation.errorCode && <span className="text-xs text-danger">{investigation.errorCode}</span>}
       </div>
       <p className="mt-4 whitespace-pre-wrap text-sm leading-6 text-foreground">{investigation.recommendation}</p>
       <CitationList citations={investigation.citations} />
       <ToolTrace trace={investigation.toolTrace} />
-      {investigation.errorMessage && <p className="mt-3 text-xs text-rose-200">{investigation.errorMessage}</p>}
+       {investigation.errorMessage && <p className="mt-3 text-xs text-danger">{investigation.errorMessage}</p>}
     </div>
   );
 }
@@ -173,18 +173,18 @@ export function CitationList({ citations }: { citations: CopilotCitation[] | Rec
   });
 
   if (normalized.length === 0) {
-    return <p className="mt-4 text-xs text-muted-foreground">No source citations returned.</p>;
+    return <p className="mt-4 text-xs text-muted-foreground">No source links returned.</p>;
   }
 
   return (
     <div className="mt-4">
-      <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Citations</p>
+      <p className="text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">Sources</p>
       <div className="mt-2 flex flex-wrap gap-2">
         {normalized.map(({ sourceType, sourceId }) => (
           <Link
             key={`${sourceType}-${sourceId}`}
             to={citationHref(sourceType, sourceId)}
-            className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-cyan-300/30 bg-cyan-300/5 px-2.5 text-xs text-cyan-200 hover:bg-cyan-300/10"
+             className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-2.5 text-xs text-primary hover:bg-primary/10"
           >
             {humanizeStatus(sourceType)} {sourceId}
             <ExternalLink className="size-3" aria-hidden="true" />
@@ -201,7 +201,7 @@ export function ToolTrace({ trace }: { trace: Record<string, unknown>[] }) {
   return (
     <details className="mt-4 rounded-md border border-border/80 bg-background/30 px-3 py-2">
       <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium text-muted-foreground">
-        <Wrench className="size-3.5" aria-hidden="true" /> Tool trace ({trace.length})
+        <Wrench className="size-3.5" aria-hidden="true" /> Tool details ({trace.length})
       </summary>
       <div className="mt-3 space-y-2">
         {trace.map((item, index) => (

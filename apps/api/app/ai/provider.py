@@ -127,10 +127,6 @@ class GeminiProvider(_HttpProvider):
         payload = {
             "contents": _gemini_contents(context),
             "tools": [{"functionDeclarations": GEMINI_TOOL_DECLARATIONS}],
-            "generationConfig": {
-                "responseMimeType": "application/json",
-                "responseSchema": ProviderRecommendation.model_json_schema(),
-            },
         }
         response = await self._post(
             f"{self.base_url}/models/{self.model}:generateContent",
@@ -149,8 +145,13 @@ class GeminiProvider(_HttpProvider):
                 if not isinstance(name, str) or not isinstance(arguments, Mapping):
                     raise ProviderError(self.name, self.model, "malformed_response")
                 return ProviderRecommendation(
-                    tool_request=ToolRequest(tool=name, arguments=dict(arguments))
+                    tool_request=ToolRequest(
+                        tool=name,
+                        arguments=dict(arguments),
+                        call_id=function_call.get("id"),
+                    )
                 )
+        for part in parts:
             text = part.get("text")
             if isinstance(text, str):
                 return _json_text(text, self.name, self.model)
@@ -183,14 +184,6 @@ class GroqProvider(_HttpProvider):
             "messages": _groq_messages(context),
             "tools": GROQ_TOOL_DECLARATIONS,
             "tool_choice": "auto",
-            "response_format": {
-                "type": "json_schema",
-                "json_schema": {
-                    "name": "investigation_recommendation",
-                    "strict": True,
-                    "schema": ProviderRecommendation.model_json_schema(),
-                },
-            },
         }
         response = await self._post(
             f"{self.base_url}/chat/completions",

@@ -64,6 +64,7 @@ describe("exception detail route", () => {
     );
 
     expect(await screen.findByRole("heading", { name: /exception exception-001/i })).toBeInTheDocument();
+    expect(screen.getByRole("complementary", { name: "Review tools" })).toBeInTheDocument();
     expect(screen.getByText(detail.message)).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /run run-001/i })).toHaveAttribute(
       "href",
@@ -83,10 +84,10 @@ describe("exception detail route", () => {
       { route: "/exceptions/exception-001" },
     );
 
-    expect(await screen.findByText("Top score")).toBeInTheDocument();
+    expect(await screen.findByText("Best score")).toBeInTheDocument();
     expect(screen.getAllByText("82")).not.toHaveLength(0);
-    expect(screen.getByText("Observed: {\"ledger\":12500,\"provider\":13000}")).toBeInTheDocument();
-    expect(screen.getByText("Deterministic fallback")).toBeInTheDocument();
+    expect(screen.getByText("Values checked: {\"ledger\":12500,\"provider\":13000}")).toBeInTheDocument();
+    expect(screen.getByText("Rules-based fallback")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /ledger ledger-001/i })).toHaveAttribute(
       "href",
       "/transactions?source=ledger&sourceId=ledger-001",
@@ -121,7 +122,7 @@ describe("exception detail route", () => {
     );
 
     fireEvent.click(await screen.findByRole("button", { name: "Investigate exception" }));
-    expect(await screen.findByText(/advisory investigation recorded/i)).toBeInTheDocument();
+    expect(await screen.findByText(/investigation saved/i)).toBeInTheDocument();
     expect(fetchSpy.mock.calls.some(([input]) => String(input).includes("/exceptions/exception-001/investigate"))).toBe(true);
   });
 
@@ -140,13 +141,13 @@ describe("exception detail route", () => {
       { route: "/exceptions/exception-001" },
     );
 
-    fireEvent.click(await screen.findByRole("button", { name: "Approve candidate" }));
-    expect(screen.getByRole("region", { name: "Review confirmation" })).toHaveTextContent(/terminal/i);
+    fireEvent.click(await screen.findByRole("button", { name: "Approve this match" }));
+    expect(screen.getByRole("region", { name: "Confirm review decision" })).toHaveTextContent(/cannot be undone/i);
     fireEvent.click(screen.getByRole("radio"));
-    fireEvent.click(screen.getByRole("button", { name: "Confirm approve" }));
+    fireEvent.click(screen.getByRole("button", { name: "Confirm approval" }));
     expect(await screen.findByRole("alert")).toHaveTextContent(/reviewed elsewhere/i);
     fireEvent.click(screen.getByRole("button", { name: "Refresh exception" }));
-    expect(await screen.findByText(/terminal review recorded/i)).toBeInTheDocument();
+    expect(await screen.findByText(/review complete/i)).toBeInTheDocument();
   });
 
   it("renders actionable not-found state for a missing exception", async () => {

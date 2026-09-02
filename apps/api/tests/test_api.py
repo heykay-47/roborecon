@@ -49,10 +49,11 @@ async def test_exception_and_audit_collections_are_paginated(client):
 
 @pytest.mark.asyncio
 async def test_investigation_endpoint_persists_and_returns_advisory_result(client, monkeypatch):
-    from app.ai.model import AIInvestigation, InvestigationMode
+    from app.ai.model import AIInvestigation, Citation, InvestigationMode
     from app.exception import router as exception_router
 
     exception_id = uuid4()
+    citation_id = uuid4()
     investigation = AIInvestigation(
         investigation_id=uuid4(),
         exception_id=exception_id,
@@ -63,7 +64,7 @@ async def test_investigation_endpoint_persists_and_returns_advisory_result(clien
         model=None,
         recommendation="Review the persisted evidence.",
         confidence=0,
-        citations=[],
+        citations=[Citation(source_type="ledger", source_id=citation_id)],
         tool_trace=[],
         error_code="provider_unavailable",
         error_message="No configured AI provider was available.",
@@ -78,6 +79,9 @@ async def test_investigation_endpoint_persists_and_returns_advisory_result(clien
 
     assert response.status_code == 200
     assert response.json()["investigationId"] == str(investigation.investigation_id)
+    assert response.json()["citations"] == [
+        {"sourceType": "ledger", "sourceId": str(citation_id)}
+    ]
     investigate.assert_awaited_once()
     assert investigate.await_args.args[1] == exception_id
     assert investigate.await_args.kwargs == {"actor": "analyst-7"}

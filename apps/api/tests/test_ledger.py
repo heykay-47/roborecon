@@ -28,6 +28,23 @@ def record(batch_id, source_type, source_id):
     }
 
 
+@pytest.mark.parametrize("parse_error", ["Missing receipt", None])
+def test_quarantine_records_hide_parser_details(parse_error):
+    row = ledger_router._record(
+        source_type="quarantine",
+        source_id=None,
+        reference=None,
+        amount=None,
+        currency=None,
+        status="quarantined",
+        business_at=None,
+        batch_id=uuid4(),
+        parse_error=parse_error,
+    )
+
+    assert row["parse_error"] == "This source record could not be read. Review the source data."
+
+
 def test_relationships_are_batch_scoped_and_exception_status_wins():
     batch_id = uuid4()
     other_batch_id = uuid4()

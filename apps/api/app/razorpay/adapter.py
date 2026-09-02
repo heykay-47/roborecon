@@ -135,7 +135,7 @@ class _OrderPayload(BaseModel):
     id: str = Field(min_length=1)
     amount: StrictInt = Field(ge=0)
     currency: str = Field(min_length=3, max_length=3)
-    receipt: str = Field(min_length=1)
+    receipt: str | None = None
     status: Literal["created", "attempted", "paid"]
     created_at: StrictInt = Field(gt=0)
 
@@ -291,7 +291,7 @@ class HttpRazorpaySource(RazorpaySource):
             settlements_raw = await self._fetch_collection(client, "/v1/settlements")
             recon_raw = await self._fetch_collection(
                 client,
-                "/v1/settlement/recon/combined",
+                "/v1/settlements/recon/combined",
                 initial_params=self.settlement_recon_params,
             )
             return self._map_snapshot(

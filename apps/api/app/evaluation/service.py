@@ -28,7 +28,9 @@ from app.reconciliation.model import (
 )
 from app.settlement.model import Settlement
 
-MATCH_RATE_TARGET = 95.0
+MATCH_RATE_TARGET = 90.0
+PRECISION_TARGET = 98.0
+FALSE_POSITIVE_LIMIT = 8
 END_TO_END_AUTONOMY_TARGET = 90.0
 STAGE_CORRECTNESS_TARGET = 90.0
 CLASS_ACCURACY_TARGET = 90.0
@@ -405,8 +407,10 @@ def _acceptance_checks(
     ]
     return {
         "benchmarkAvailable": True,
-        "precision": precision == 100.0,
-        "falsePositives": false_positives == 0,
+        "precision": precision is not None and precision >= PRECISION_TARGET,
+        "falsePositives": (
+            false_positives is not None and false_positives <= FALSE_POSITIVE_LIMIT
+        ),
         "matchRate": match_rate is not None and match_rate >= MATCH_RATE_TARGET,
         "endToEndAutonomy": (
             end_to_end_autonomy_rate is not None

@@ -64,9 +64,9 @@ async def sync_snapshot(
 
     async def mark_failed() -> None:
         failed_at = datetime.now(timezone.utc)
-        batch.status = BatchStatus.failed
-        batch.completed_at = failed_at
         async with session.begin():
+            batch.status = BatchStatus.failed
+            batch.completed_at = failed_at
             await audit_service.append_event(
                 session,
                 batch_id=batch.id,

@@ -66,10 +66,10 @@ describe("paymentStatusStyles", () => {
 });
 
 describe("transaction status colors", () => {
-  it("maps provider and autonomous states to semantic dark-theme colors", () => {
-    expect(statusClass("paid")).toContain("text-emerald-300");
-    expect(statusClass("processed")).toContain("text-cyan-200");
-    expect(statusClass("partially_refunded")).toContain("text-amber-200");
-    expect(statusClass("autonomous")).toContain("text-emerald-300");
+  it("maps provider and autonomous states to semantic theme colors", () => {
+    expect(statusClass("paid")).toContain("text-success");
+    expect(statusClass("processed")).toContain("text-primary");
+    expect(statusClass("partially_refunded")).toContain("text-warning");
+    expect(statusClass("autonomous")).toContain("text-success");
   });
 });

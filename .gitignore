@@ -3,6 +3,11 @@
 .env.local
 .env.*.local
 
+# Local planning and agent artifacts
+docs/
+.superpowers/
+.agent/
+
 # Python
 __pycache__/
 *.py[cod]

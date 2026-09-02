@@ -40,7 +40,7 @@ async def test_http_source_uses_basic_auth_bounded_get_pagination_and_canonical_
             payload = fixture("settlements.json") if skip == "0" else {
                 "entity": "collection", "count": 0, "items": []
             }
-        elif request.url.path == "/v1/settlement/recon/combined":
+        elif request.url.path == "/v1/settlements/recon/combined":
             payload = fixture("settlement-recon.json") if skip == "0" else {
                 "entity": "collection", "count": 0, "items": []
             }
@@ -77,6 +77,29 @@ async def test_http_source_uses_basic_auth_bounded_get_pagination_and_canonical_
     assert snapshot.bank_credits == ()
     assert {request.method for request in requests} == {"GET"}
     assert all(request.url.params.get("count") == "1" for request in requests)
+
+
+def test_http_source_uses_order_id_when_razorpay_receipt_is_null():
+    from app.razorpay.adapter import HttpRazorpaySource
+
+    snapshot = HttpRazorpaySource._map_snapshot(
+        [
+            {
+                "id": "order_without_receipt",
+                "amount": 100,
+                "currency": "INR",
+                "receipt": None,
+                "status": "created",
+                "created_at": 1754000000,
+            }
+        ],
+        [],
+        [],
+        [],
+        [],
+    )
+
+    assert snapshot.razorpay_orders[0].receipt == "order_without_receipt"
 
 
 @pytest.mark.asyncio

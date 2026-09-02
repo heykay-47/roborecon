@@ -426,7 +426,7 @@ def test_stage_a_ambiguous_result_does_not_reserve_provisional_provider_id():
             ledger("ambiguous", reference="RCPT-001"),
             ledger("after-ambiguous", reference="PAY-AMBIGUOUS"),
         ],
-        [order()],
+        [order(), order(key="runner-up", provider_order_id="order_runner", receipt="RCPT-0012")],
         [ambiguous, runner_up],
         [],
     )
@@ -1051,7 +1051,7 @@ def test_stage_a_exact_chain_with_close_runner_up_is_not_autonomous():
 
     outcome = reconcile_stage_a(
         [ledger()],
-        [order()],
+        [order(), order(key="runner-up", provider_order_id="order_runner", receipt="RCPT-0012")],
         [exact_payment, runner_up],
         [],
     )[0]

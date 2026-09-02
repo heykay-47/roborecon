@@ -58,6 +58,9 @@ def test_positive_cases_have_source_visible_identity_evidence():
     payment_by_id = {row.id: row for row in dataset.razorpay_payments}
     order_by_id = {row.id: row for row in dataset.razorpay_orders}
 
+    adversarial_case_ids = {
+        dataset.truth_cases[index].case_id for index in (9, 10, 20, 108)
+    }
     for case in dataset.truth_cases:
         if not case.matchable:
             continue
@@ -69,12 +72,34 @@ def test_positive_cases_have_source_visible_identity_evidence():
         assert payment.amount == order.amount
         assert payment.currency == order.currency == ledger.currency
         assert order.status == "paid"
-        if case.scenario_class == "fuzzy_reference":
+        if case.case_id in adversarial_case_ids:
+            assert ledger.reference != payment.receipt
+            assert ledger.reference.startswith("pay_")
+        elif case.scenario_class == "fuzzy_reference":
             assert ledger.reference != payment.receipt
             assert "INVOICE" in ledger.reference.upper()
             assert "INVOICE" in payment.receipt.upper()
         else:
             assert ledger.reference == payment.receipt == order.receipt
+
+
+def test_adversarial_reference_pairs_cross_equal_amount_payments():
+    dataset = build_demo_dataset()
+    ledger_by_id = {row.id: row for row in dataset.ledger_entries}
+    payment_by_id = {row.id: row for row in dataset.razorpay_payments}
+
+    for left_index, right_index in ((9, 10), (20, 108)):
+        left = dataset.truth_cases[left_index]
+        right = dataset.truth_cases[right_index]
+        left_ledger = ledger_by_id[left.ledger_entry_id]
+        right_ledger = ledger_by_id[right.ledger_entry_id]
+        left_payment = payment_by_id[left.razorpay_payment_id]
+        right_payment = payment_by_id[right.razorpay_payment_id]
+
+        assert left.amount == right.amount
+        assert left_ledger.reference == right_payment.provider_payment_id
+        assert right_ledger.reference == left_payment.provider_payment_id
+        assert left.razorpay_payment_id != right.razorpay_payment_id
 
 
 def test_fixed_dataset_contract():
@@ -177,9 +202,9 @@ def test_fee_gst_cases_have_fee_and_tax_settlement_lines():
 
 def test_custom_seed_changes_stable_source_ids():
     default = build_demo_dataset()
-    custom = build_demo_dataset("razorrecon-v2")
+    custom = build_demo_dataset("roborecon-v2")
 
-    assert custom == build_demo_dataset("razorrecon-v2")
+    assert custom == build_demo_dataset("roborecon-v2")
     assert default.batch_id != custom.batch_id
     assert default.ledger_entries[0].id != custom.ledger_entries[0].id
     assert default.razorpay_payments[0].id != custom.razorpay_payments[0].id

@@ -55,6 +55,6 @@ describe("audit page", () => {
     expect(events[0]).toHaveTextContent("#1");
     expect(events[1]).toHaveTextContent("#2");
     expect(screen.getByText("human")).toBeInTheDocument();
-    expect(screen.getByText(/tool trace/i)).toBeInTheDocument();
+    expect(screen.getByText(/tool details/i)).toBeInTheDocument();
   });
 });

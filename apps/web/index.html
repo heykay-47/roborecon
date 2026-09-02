@@ -4,16 +4,34 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-    <meta name="theme-color" content="#07111f" />
+    <meta name="theme-color" content="#151412" />
     <title>Roborecon</title>
   </head>
   <body>
     <!-- THESIS: Evidence-first reconciliation, not a generic KPI dashboard.
-    OWN-WORLD: Dark navy operational surfaces with cyan controls and emerald truth states.
+    OWN-WORLD: Warm charcoal and bone operational surfaces with copper controls and semantic truth states.
     STORY: Operators see the latest run, trust its evidence, and route uncertainty to review.
     FIRST VIEWPORT: Overview metrics, current batch state, and reset/run actions lead the page.
     FORM: Dense operational control plane, code-led from the brief's pinned direction.
     FINISH: unreviewed and undocumented is unfinished; this build ends with the finish review, the verdict, and DESIGN.md -->
+    <script>
+      (() => {
+        const storageKey = "roborecon-theme";
+        let theme = "dark";
+        try {
+          theme = window.localStorage.getItem(storageKey) === "light" ? "light" : "dark";
+        } catch {
+          // Keep the dark default when storage is unavailable.
+        }
+        document.documentElement.classList.toggle("dark", theme === "dark");
+        document.documentElement.dataset.theme = theme;
+        document.documentElement.style.colorScheme = theme;
+        document.querySelector('meta[name="theme-color"]')?.setAttribute(
+          "content",
+          theme === "dark" ? "#151412" : "#f5f2ec",
+        );
+      })();
+    </script>
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

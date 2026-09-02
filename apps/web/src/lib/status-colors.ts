@@ -1,13 +1,14 @@
-const positive = "border-emerald-400/30 bg-emerald-400/10 text-emerald-300";
-const warning = "border-amber-400/30 bg-amber-400/10 text-amber-200";
-const danger = "border-rose-400/30 bg-rose-400/10 text-rose-200";
-const neutral = "border-slate-400/30 bg-slate-400/10 text-slate-200";
-const active = "border-cyan-400/30 bg-cyan-400/10 text-cyan-200";
+const positive = "border-success/30 bg-success/10 text-success";
+const warning = "border-warning/30 bg-warning/10 text-warning";
+const danger = "border-danger/30 bg-danger/10 text-danger";
+const neutral = "border-neutral/30 bg-neutral/10 text-neutral";
+const active = "border-primary/30 bg-primary/10 text-primary";
+const duplicate = "border-duplicate/30 bg-duplicate/10 text-duplicate";
 
 export const resultStatusStyles: Record<string, string> = {
   matched: positive,
   ambiguous: warning,
-  duplicate: "border-violet-400/30 bg-violet-400/10 text-violet-200",
+  duplicate,
   missing_razorpay: danger,
   missing_ledger: danger,
   missing_settlement: danger,
@@ -55,29 +56,32 @@ export const transactionStatusStyles: Record<string, string> = {
 };
 
 export const reconciliationStatusStyles: Record<string, string> = {
-  matched: "bg-green-100 text-green-800 border-green-200",
-  matched_with_fee: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  amount_mismatch: "bg-amber-100 text-amber-800 border-amber-200",
-  missing_internal: "bg-red-100 text-red-800 border-red-200",
-  missing_external: "bg-orange-100 text-orange-800 border-orange-200",
-  duplicate: "bg-purple-100 text-purple-800 border-purple-200",
-  disputed: "bg-rose-100 text-rose-800 border-rose-200",
+  matched: positive,
+  matched_with_fee: "border-success/50 bg-success/5 text-success",
+  amount_mismatch: warning,
+  missing_internal: danger,
+  missing_external: "border-warning/50 bg-warning/5 text-warning",
+  duplicate,
+  disputed: "border-danger/50 bg-danger/5 text-danger",
 };
 
 export const paymentStatusStyles: Record<string, string> = {
-  succeeded: "bg-green-100 text-green-800 border-green-200",
-  pending: "bg-yellow-100 text-yellow-800 border-yellow-200",
-  failed: "bg-red-100 text-red-800 border-red-200",
-  refunded: "bg-blue-100 text-blue-800 border-blue-200",
-  partially_refunded: "bg-sky-100 text-sky-800 border-sky-200",
-  disputed: "bg-rose-100 text-rose-800 border-rose-200",
+  succeeded: positive,
+  pending: warning,
+  failed: danger,
+  refunded: neutral,
+  partially_refunded: "border-warning/50 bg-warning/5 text-warning",
+  disputed: "border-danger/50 bg-danger/5 text-danger",
 };
 
 export function humanizeStatus(value: string): string {
   return value
     .replace(/([a-z])([A-Z])/g, "$1 $2")
-    .replace(/[_-]/g, " ")
-    .replace(/\b\w/g, (character) => character.toUpperCase());
+    .replace(/[_.-]/g, " ")
+    .replace(/\b\w/g, (character) => character.toUpperCase())
+    .replace(/\bAi\b/g, "AI")
+    .replace(/\bId\b/g, "ID")
+    .replace(/\bInr\b/g, "INR");
 }
 
 export function statusClass(value: string): string {

@@ -36,14 +36,14 @@ describe("exceptions queue", () => {
     expect(await screen.findByRole("heading", { name: "Exceptions" })).toBeInTheDocument();
     expect(screen.getAllByText("₹125.00")).not.toHaveLength(0);
     expect(screen.getAllByText("Amount Mismatch")).not.toHaveLength(0);
-    expect(screen.getAllByText("Age unavailable")).not.toHaveLength(0);
+    expect(screen.getAllByText("Unknown")).not.toHaveLength(0);
     expect(screen.getAllByText("Ready to investigate")).not.toHaveLength(0);
     expect(screen.getAllByRole("link", { name: /exception exception-001/i })[0]).toHaveAttribute(
       "href",
       "/exceptions/exception-001",
     );
 
-    fireEvent.change(screen.getByLabelText("Exception status"), {
+    fireEvent.change(screen.getByLabelText("Status"), {
       target: { value: "approved" },
     });
     await waitFor(() => expect(fetchMock).toHaveBeenCalledWith(

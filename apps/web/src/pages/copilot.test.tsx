@@ -15,6 +15,7 @@ describe("Copilot page", () => {
         return new Response(JSON.stringify({ items: [{ sourceType: "settlement", sourceId: "settlement-001", reference: "set_001", amount: 10000, currency: "INR", status: "processed", businessAt: "2026-08-26T01:00:00Z", batchId: "batch-001", reconciliationState: "matched", parseError: null, runId: "run-001", resultId: null, exceptionId: null }], total: 1, page: 1, pageSize: 200 }));
       }
       const body = typeof init?.body === "string" ? JSON.parse(init.body) as Record<string, unknown> : {};
+      expect(body.question).toBe("Why is this settlement lower than captured payments?");
       expect(body.settlementId).toBe("settlement-001");
       return new Response(JSON.stringify({
         answer: "Settlement net is INR 100.00 after the persisted lines.",
@@ -41,7 +42,7 @@ describe("Copilot page", () => {
       "href",
       "/transactions?source=settlement&sourceId=settlement-001",
     );
-    expect(screen.getByText("Deterministic fallback")).toBeInTheDocument();
+    expect(screen.getByText("Rules-based answer")).toBeInTheDocument();
     expect(screen.getByText(/expectedNet/i)).toBeInTheDocument();
   });
 
@@ -61,7 +62,7 @@ describe("Copilot page", () => {
     );
 
     fireEvent.click(await screen.findByRole("button", { name: "Explain settlement" }));
-    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/unable to explain/i));
+    await waitFor(() => expect(screen.getByRole("alert")).toHaveTextContent(/could not explain/i));
     expect(screen.getByRole("alert")).toHaveTextContent(/Settlement was not found/);
   });
 });

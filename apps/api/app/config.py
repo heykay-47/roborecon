@@ -26,8 +26,8 @@ class Settings(BaseSettings):
     groq_api_key: str | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     groq_base_url: str = "https://api.groq.com/openai/v1"
-    gemini_model: str = "gemini-2.5-flash"
-    groq_model: str = "openai/gpt-oss-20b"
+    gemini_model: str = "gemma-4-31b-it"
+    groq_model: str = "qwen/qwen3.8-27b"
     ai_timeout_seconds: float = Field(default=10.0, gt=0, le=60.0)
     ai_max_tool_rounds: int = Field(default=4, ge=1, le=4)
     ai_max_source_ids: int = Field(default=10, ge=1, le=10)

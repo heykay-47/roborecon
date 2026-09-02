@@ -19,7 +19,6 @@ apps/api/tests/     Backend tests and fixed benchmark helper
 apps/web/src/       React operations workspace
 apps/api/http/      REST Client judge-flow requests
 scripts/            Container-only demo and verification entrypoints
-docs/               Deployment and acceptance handoff
 ```
 
 ## Domain Rules
@@ -48,4 +47,4 @@ Run focused container checks when iterating. The full API invocation has `python
 
 ## Collaboration
 
-Preserve unrelated worktree changes. Do not modify SDD plan files or their progress ledger during implementation. Update `docs/HANDOFF.md` after a completed vertical slice and keep commits scoped to the requested task.
+Preserve unrelated worktree changes. Keep implementation commits scoped to the requested task.

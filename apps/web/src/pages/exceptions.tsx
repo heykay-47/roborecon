@@ -19,7 +19,7 @@ const statuses = [
 ] as const;
 
 const exceptionTypes = [
-  ["", "All exception types"],
+  ["", "All issue types"],
   ["ambiguous", "Ambiguous"],
   ["duplicate", "Duplicate"],
   ["missing_razorpay", "Missing Razorpay"],
@@ -27,7 +27,7 @@ const exceptionTypes = [
   ["missing_settlement", "Missing settlement"],
   ["missing_bank_credit", "Missing bank credit"],
   ["amount_mismatch", "Amount mismatch"],
-  ["malformed", "Malformed"],
+  ["malformed", "Invalid record"],
 ] as const;
 
 function ExceptionIdentity({ exception }: { exception: ExceptionSummary }) {
@@ -35,7 +35,7 @@ function ExceptionIdentity({ exception }: { exception: ExceptionSummary }) {
     <div className="min-w-0">
       <Link
         to={`/exceptions/${exception.exceptionId}`}
-        className="group inline-flex max-w-full items-center gap-1.5 font-mono text-sm text-cyan-200 hover:text-cyan-100"
+         className="group inline-flex max-w-full items-center gap-1.5 font-mono text-sm text-primary hover:text-primary/80"
       >
         <span className="truncate">Exception {exception.exceptionId}</span>
         <ArrowUpRight className="size-3 shrink-0 opacity-60 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden="true" />
@@ -54,9 +54,9 @@ function ExceptionRow({ exception }: { exception: ExceptionSummary }) {
         <p className="mt-1 font-mono text-xs text-muted-foreground">{humanizeStatus(exception.sourceType ?? "unknown source")}</p>
       </td>
       <td className="px-4 py-3 align-top font-mono text-sm tabular-nums">{formatInr(exception.amount)}</td>
-      <td className="px-4 py-3 align-top text-sm text-muted-foreground">{exception.createdAt ? formatDateTime(exception.createdAt) : "Age unavailable"}</td>
+      <td className="px-4 py-3 align-top text-sm text-muted-foreground">{exception.createdAt ? formatDateTime(exception.createdAt) : "Unknown"}</td>
       <td className="px-4 py-3 align-top"><StatusBadge value={exception.status} /></td>
-      <td className="px-4 py-3 align-top text-xs text-muted-foreground">{exception.aiReady ? "Ready to investigate" : "Trace recorded or closed"}</td>
+      <td className="px-4 py-3 align-top text-xs text-muted-foreground">{exception.aiReady ? "Ready to investigate" : "Already investigated or closed"}</td>
     </tr>
   );
 }
@@ -70,7 +70,7 @@ function ExceptionCard({ exception }: { exception: ExceptionSummary }) {
       </div>
       <dl className="mt-4 grid grid-cols-2 gap-x-4 gap-y-3 text-sm">
         <div>
-          <dt className="text-xs text-muted-foreground">Class</dt>
+          <dt className="text-xs text-muted-foreground">Type</dt>
           <dd className="mt-1 font-medium">{humanizeStatus(exception.exceptionType)}</dd>
         </div>
         <div>
@@ -79,11 +79,11 @@ function ExceptionCard({ exception }: { exception: ExceptionSummary }) {
         </div>
         <div>
           <dt className="text-xs text-muted-foreground">Age</dt>
-          <dd className="mt-1 text-muted-foreground">{exception.createdAt ? formatDateTime(exception.createdAt) : "Age unavailable"}</dd>
+          <dd className="mt-1 text-muted-foreground">{exception.createdAt ? formatDateTime(exception.createdAt) : "Unknown"}</dd>
         </div>
         <div>
-          <dt className="text-xs text-muted-foreground">AI readiness</dt>
-          <dd className="mt-1 text-muted-foreground">{exception.aiReady ? "Ready to investigate" : "Trace recorded or closed"}</dd>
+          <dt className="text-xs text-muted-foreground">Investigation</dt>
+          <dd className="mt-1 text-muted-foreground">{exception.aiReady ? "Ready to investigate" : "Already investigated or closed"}</dd>
         </div>
       </dl>
     </article>
@@ -121,15 +121,15 @@ export function ExceptionsPage() {
   };
 
   if (exceptions.isLoading) {
-    return <PageState kind="loading" headingLevel="h1" title="Loading exceptions" description="Reading unresolved reconciliation cases and their review state." />;
+    return <PageState kind="loading" headingLevel="h1" title="Loading exceptions…" description="Getting cases that need review." />;
   }
   if (exceptions.isError) {
-    return <PageState kind="error" headingLevel="h1" title="Unable to load exceptions" description={exceptions.error.message} action={<RetryButton onClick={() => void exceptions.refetch()} />} />;
+    return <PageState kind="error" headingLevel="h1" title="Could not load exceptions" description={exceptions.error.message} action={<RetryButton onClick={() => void exceptions.refetch()} />} />;
   }
 
   const data = exceptions.data;
   if (!data) {
-    return <PageState kind="error" headingLevel="h1" title="Exception data is unavailable" description="The API returned no exception queue payload." />;
+    return <PageState kind="error" headingLevel="h1" title="Exceptions are not available" description="No exception data was returned." />;
   }
 
   return (
@@ -137,14 +137,14 @@ export function ExceptionsPage() {
       <div className="flex flex-col justify-between gap-3 border-b border-border pb-6 sm:flex-row sm:items-end">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Exceptions</h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Review uncertainty without hiding the evidence that caused it.</p>
+          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">Review unclear matches with the evidence behind them.</p>
         </div>
         <p className="font-mono text-xs text-muted-foreground">{formatInteger(data.total)} total cases</p>
       </div>
 
       <section className="grid gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-2 lg:grid-cols-4" aria-label="Exception filters">
         <label className="space-y-1.5 text-xs font-medium text-muted-foreground" htmlFor="exception-status">
-          Exception status
+          Status
           <Select id="exception-status" value={filters.status ?? ""} onChange={(event) => updateFilter("status", event.target.value)}>
             {statuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </Select>
@@ -157,13 +157,13 @@ export function ExceptionsPage() {
           </Select>
         </label>
         <label className="space-y-1.5 text-xs font-medium text-muted-foreground" htmlFor="exception-type">
-          Exception type
+          Issue type
           <Select id="exception-type" value={filters.exceptionType ?? ""} onChange={(event) => updateFilter("exceptionType", event.target.value)}>
             {exceptionTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </Select>
         </label>
         <label className="space-y-1.5 text-xs font-medium text-muted-foreground" htmlFor="exception-run">
-          Reconciliation run
+          Run
           <Select id="exception-run" value={filters.runId ?? ""} onChange={(event) => updateFilter("runId", event.target.value)} disabled={runs.isLoading}>
             <option value="">All runs</option>
             {runs.data?.items.map((run) => <option key={run.runId} value={run.runId}>{run.runId}</option>)}
@@ -173,12 +173,12 @@ export function ExceptionsPage() {
 
       <Card>
         <CardHeader className="flex-row items-center justify-between">
-          <CardTitle className="text-sm font-medium">Review queue</CardTitle>
-          {exceptions.isFetching && !exceptions.isLoading && <span role="status" className="text-xs text-cyan-200">Updating exceptions...</span>}
+          <CardTitle className="text-sm font-medium">Exceptions to review</CardTitle>
+            {exceptions.isFetching && !exceptions.isLoading && <span role="status" className="text-xs text-primary">Updating list…</span>}
         </CardHeader>
         <CardContent>
           {data.items.length === 0 ? (
-            <PageState kind="empty" title="No exceptions match these filters." description="Try another status or batch, or run reconciliation to create new evidence." />
+              <PageState kind="empty" title="No exceptions match these filters." description="Try different filters, or run reconciliation to find new exceptions." />
           ) : (
             <>
               <div className="hidden overflow-x-auto md:block">
@@ -186,11 +186,11 @@ export function ExceptionsPage() {
                   <thead className="border-b border-border text-xs uppercase tracking-[0.12em] text-muted-foreground">
                     <tr>
                       <th className="px-4 pb-3 font-medium">Exception</th>
-                      <th className="px-4 pb-3 font-medium">Class</th>
+                      <th className="px-4 pb-3 font-medium">Type</th>
                       <th className="px-4 pb-3 font-medium">Amount</th>
                       <th className="px-4 pb-3 font-medium">Age</th>
                       <th className="px-4 pb-3 font-medium">Status</th>
-                      <th className="px-4 pb-3 font-medium">AI readiness</th>
+                      <th className="px-4 pb-3 font-medium">Investigation</th>
                     </tr>
                   </thead>
                   <tbody>{data.items.map((exception) => <ExceptionRow key={exception.exceptionId} exception={exception} />)}</tbody>

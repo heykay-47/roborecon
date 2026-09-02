@@ -13,11 +13,16 @@ docker compose up --build -d
 
 Then open <http://localhost:3000>:
 
-1. **Overview:** confirm the seeded benchmark badge, match rate, precision, false positives, autonomous rate, runtime, and money totals.
+1. **Overview:** confirm the seeded benchmark badge, match rate, precision, false positives, end-to-end autonomous resolution, runtime, and money totals.
 2. **Runs:** open the latest completed run and inspect the two stage metrics, per-class metrics, and every acceptance gate.
 3. **Exceptions:** open an unresolved case, inspect deterministic evidence and candidates, run the optional advisory investigation, then approve or reject one case.
 4. **Audit:** confirm the reset, run, investigation, and terminal review events are linked to the batch and actor.
 5. **Copilot:** ask the seeded settlement question and follow its typed source citations. Without an AI key it displays the deterministic fallback, not fabricated prose.
+
+## Screenshots
+
+The seeded offline judge flow is available from the running local web application at
+<http://localhost:3000>.
 
 The same deterministic acceptance check can be run without the browser:
 
@@ -47,7 +52,7 @@ All money is integer INR paise. Ground Truth is stored separately for evaluation
 
 ## Seeded Benchmark
 
-The deterministic demo uses seed `razorrecon-v1` and contains:
+The deterministic demo uses seed `roborecon-v1` and contains:
 
 - 120 merchant Ledger entries plus provider-only and malformed records.
 - Exact identifiers, fee/GST arithmetic, date shifts, fuzzy references, duplicates, amount mismatches, missing Razorpay records, missing Settlements, missing Bank Credits, refunds, held/released amounts, and ambiguous candidates.
@@ -56,7 +61,7 @@ The deterministic demo uses seed `razorrecon-v1` and contains:
 
 ## Metrics
 
-The UI and acceptance CLI use these definitions:
+The UI and acceptance CLI compute these metrics only for the fixed synthetic demo, where hidden Ground Truth is available. A 100% result means the deterministic matcher handled that finite benchmark; it is not a measured production accuracy rate, forecast, or guarantee. Imported Razorpay batches are not assigned truth-based accuracy metrics.
 
 | Metric | Definition |
 | --- | --- |
@@ -69,7 +74,7 @@ The UI and acceptance CLI use these definitions:
 | Money reconciled | INR gross value of correctly closed Ledger entries; Settlement net is reported separately. |
 | Money unresolved | Ledger value without an accepted Match Link, including open and confirmed-no-match outcomes. |
 
-Acceptance gates require 100% autonomous precision, zero false positives, at least 95% match rate, at least 90% strict end-to-end autonomy, at least 90% Stage A/Stage B/per-positive-class accuracy, 100% exception recall, and at most five seconds deterministic runtime.
+Seeded benchmark acceptance gates require at least 98% autonomous-link precision, no more than eight incorrect selected links, at least 90% match rate, at least 90% strict end-to-end autonomy, at least 90% Stage A/Stage B/per-positive-class accuracy, 100% exception recall, and at most five seconds deterministic runtime. The fixed data includes crossed-reference noise so the benchmark measures real deterministic errors instead of producing perfect scores. These are test gates, not production performance claims.
 
 ## Local Development
 
@@ -93,11 +98,39 @@ npm run demo
 
 The request examples in `apps/api/http/judge-flow.http` mirror the browser flow: health, demo reset, run, metrics, exceptions, transactions, audit, and optional Test Mode sync.
 
+### Razorpay Test Mode Sync
+
+The connector makes read-only `GET` requests to Razorpay for orders, payments, refunds, settlements, and settlement reconciliation details. It stores the response as a separate, unscored source batch; it never writes to Razorpay.
+
+1. Generate Test Mode API keys in Razorpay Dashboard under `Account & Settings -> API Keys`.
+2. Create the ignored local environment file and fill only the two Razorpay fields:
+
+```bash
+cp .env.example .env
+```
+
+```text
+RAZORPAY_KEY_ID=rzp_test_...
+RAZORPAY_KEY_SECRET=...
+```
+
+3. Start or restart the API with Docker Compose:
+
+```bash
+docker compose up --build -d postgres api web
+```
+
+4. Trigger one sync and inspect the returned `batchId` and `sourceCounts`:
+
+```bash
+curl --fail --silent --show-error --request POST http://localhost:8000/razorpay/sync
+```
+
+Use Test Mode keys only while developing. If either key is absent, the endpoint intentionally uses its fixed local demo connector instead, so the offline flow remains reproducible. Never commit `.env` or share the secret.
+
 ## Hosted Deployment
 
 The supported low-cost hosted topology is separate Vercel projects rooted at `apps/web` and `apps/api`, backed by a pooled Neon connection. Configure `VITE_API_URL` on Web and `DATABASE_URL`, `SERVERLESS=true`, and `CORS_ORIGINS` on API. Never commit connection strings or provider keys.
-
-See [deployment instructions](docs/DEPLOYMENT.md) for the exact Vercel configs, Neon asyncpg settings, bundle and duration limits, and the Cloud Run Docker fallback.
 
 ## Project Structure
 
@@ -106,7 +139,6 @@ apps/api/          FastAPI API, deterministic engine, persistence, evaluation, A
 apps/web/          React/Vite operations workspace
 apps/api/http/     Judge-flow REST Client requests
 scripts/           Container-only demo and verification entrypoints
-docs/              Deployment and final acceptance handoff
 docker-compose.yml Offline PostgreSQL, API, and Web orchestration
 ```
 

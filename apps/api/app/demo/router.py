@@ -21,7 +21,7 @@ async def reset_demo_endpoint(
         )
 
     batch = await reset_demo(session)
-    dataset = build_demo_dataset(batch.seed or "razorrecon-v1")
+    dataset = build_demo_dataset(batch.seed or "roborecon-v1")
     batch_response = BatchResponse.model_validate(batch)
     response_data = batch_response.model_dump()
     response_data["source_counts"] = source_counts(dataset)

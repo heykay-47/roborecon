@@ -17,7 +17,7 @@ const SettingsPage = lazy(() => import("@/pages/settings"));
 function App() {
   return (
     <BrowserRouter>
-      <Suspense fallback={<PageState kind="loading" headingLevel="h1" title="Loading workspace" description="Preparing the operational surface." />}>
+       <Suspense fallback={<PageState kind="loading" headingLevel="h1" title="Loading RoboRecon…" description="Getting the workspace ready." />}>
         <Routes>
           <Route element={<Layout />}>
             <Route path="/" element={<OverviewPage />} />
@@ -29,7 +29,7 @@ function App() {
             <Route path="/audit" element={<AuditPage />} />
             <Route path="/copilot" element={<CopilotPage />} />
             <Route path="/settings" element={<SettingsPage />} />
-            <Route path="*" element={<NotFoundPage title="Page not found" description="This route is not part of the current workspace." />} />
+            <Route path="*" element={<NotFoundPage title="Page not found" description="This page is not part of the workspace." />} />
           </Route>
         </Routes>
       </Suspense>

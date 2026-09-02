@@ -15,4 +15,4 @@ docker run --rm roborecon-web-test npm test -- --run
 docker run --rm roborecon-web-test npm exec tsc -- -b
 docker run --rm roborecon-web-test npm run lint
 docker run --rm roborecon-web-test npm run build
-docker compose config
+docker compose config --quiet

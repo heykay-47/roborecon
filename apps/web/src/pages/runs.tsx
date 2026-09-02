@@ -18,12 +18,18 @@ import {
 } from "@/components/ui/table";
 
 function RunRow({ run }: { run: RunSummary }) {
+  const benchmarkStatus = !run.metrics?.benchmarkAvailable
+    ? "Not scored"
+    : run.metrics.acceptancePassed
+      ? "Benchmark passed"
+      : "Benchmark not met";
+
   return (
     <TableRow>
       <TableCell>
         <Link
           to={`/runs/${run.runId}`}
-          className="group inline-flex items-center gap-1.5 font-mono text-sm text-cyan-200 hover:text-cyan-100"
+           className="group inline-flex items-center gap-1.5 font-mono text-sm text-primary hover:text-primary/80"
         >
           {run.runId}
           <ArrowUpRight className="size-3 opacity-50 transition-transform group-hover:-translate-y-0.5 group-hover:translate-x-0.5" aria-hidden="true" />
@@ -35,15 +41,15 @@ function RunRow({ run }: { run: RunSummary }) {
         <StatusBadge value={run.status} />
       </TableCell>
       <TableCell className="text-right font-mono tabular-nums">{formatInteger(run.sourceRowCount)}</TableCell>
-      <TableCell className="text-right font-mono tabular-nums">{run.throughput?.toFixed(2) ?? "Unavailable"}</TableCell>
+           <TableCell className="text-right font-mono tabular-nums">{run.throughput?.toFixed(2) ?? "Not available"}</TableCell>
       <TableCell className="font-mono text-xs">{formatDuration(run.durationMs)}</TableCell>
       <TableCell>
         {run.metrics ? (
-          <span className={run.metrics.acceptancePassed ? "text-emerald-300" : "text-amber-200"}>
-            {run.metrics.acceptancePassed ? "Passed" : "Not passed"}
+           <span className={run.metrics.acceptancePassed ? "text-success" : "text-warning"}>
+             {benchmarkStatus}
           </span>
         ) : (
-          <span className="text-muted-foreground">Unavailable</span>
+           <span className="text-muted-foreground">Not available</span>
         )}
       </TableCell>
     </TableRow>
@@ -56,16 +62,16 @@ export function RunsPage() {
   const runs = useRuns(page, pageSize);
 
   if (runs.isLoading) {
-    return <PageState kind="loading" headingLevel="h1" title="Loading runs" description="Reading immutable reconciliation run history." />;
+    return <PageState kind="loading" headingLevel="h1" title="Loading run history…" description="Getting saved reconciliation runs." />;
   }
 
   if (runs.isError) {
-    return <PageState kind="error" headingLevel="h1" title="Unable to load runs" description={runs.error.message} action={<RetryButton onClick={() => void runs.refetch()} />} />;
+    return <PageState kind="error" headingLevel="h1" title="Could not load run history" description={runs.error.message} action={<RetryButton onClick={() => void runs.refetch()} />} />;
   }
 
   const data = runs.data;
   if (!data) {
-    return <PageState kind="error" headingLevel="h1" title="Run data is unavailable" description="The API returned no run history payload." />;
+    return <PageState kind="error" headingLevel="h1" title="Run history is not available" description="No run history was returned." />;
   }
 
   const total = data.total;
@@ -76,23 +82,23 @@ export function RunsPage() {
       <div className="flex flex-col justify-between gap-3 border-b border-border pb-6 sm:flex-row sm:items-end">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Runs</h1>
-          <p className="mt-2 text-sm text-muted-foreground">Immutable executions of the deterministic policy.</p>
+          <p className="mt-2 text-sm text-muted-foreground">Saved runs from each reconciliation.</p>
         </div>
-        <p className="font-mono text-xs text-muted-foreground">{formatInteger(total)} total runs</p>
+        <p className="font-mono text-xs text-muted-foreground">{formatInteger(total)} saved runs</p>
       </div>
 
       <Card>
         <CardHeader className="flex-row items-center justify-between">
-          <CardTitle className="text-sm font-medium">Run history</CardTitle>
+          <CardTitle className="text-sm font-medium">Saved runs</CardTitle>
           {runs.isFetching && !runs.isLoading && (
-            <span role="status" aria-label="Updating runs" className="text-xs text-cyan-200">
-              Updating runs...
+              <span role="status" aria-label="Updating run list…" className="text-xs text-primary">
+              Updating run list…
             </span>
           )}
         </CardHeader>
         <CardContent>
           {data.items.length === 0 ? (
-            <PageState kind="empty" title="No runs yet" description="Reset a demo batch and run reconciliation to create the first evidence-backed run." />
+            <PageState kind="empty" title="No runs yet" description="Reset the demo data, then run reconciliation to create the first run." />
           ) : (
             <>
               <Table>
@@ -102,9 +108,9 @@ export function RunsPage() {
                     <TableHead>Batch</TableHead>
                     <TableHead>Status</TableHead>
                     <TableHead className="text-right">Records</TableHead>
-                    <TableHead className="text-right">Throughput</TableHead>
-                    <TableHead>Duration</TableHead>
-                    <TableHead>Acceptance</TableHead>
+                    <TableHead className="text-right">Speed</TableHead>
+                    <TableHead>Time</TableHead>
+                    <TableHead>Checks</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -113,7 +119,7 @@ export function RunsPage() {
               </Table>
               <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
                 <span className="text-xs text-muted-foreground">
-                  Page {page} of {totalPages} · {formatInteger(total)} runs
+                  Page {page} of {totalPages} · {formatInteger(total)} saved runs
                 </span>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" aria-label="Previous page" disabled={page === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>

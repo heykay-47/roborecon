@@ -47,14 +47,14 @@ function OverviewActions({
   return (
     <div className="flex flex-wrap items-center gap-2">
       <Button variant="outline" size="sm" onClick={onReset} disabled={isResetting || isRunning}>
-        {isResetting ? "Resetting demo..." : "Reset demo"}
+        {isResetting ? "Resetting demo data…" : "Reset demo data"}
       </Button>
       <Button
         size="sm"
         onClick={onRun}
         disabled={!batchId || batchStatus !== "completed" || isResetting || isRunning}
       >
-        {isRunning ? "Running reconciliation..." : "Run reconciliation"}
+        {isRunning ? "Running reconciliation…" : "Run reconciliation"}
       </Button>
     </div>
   );
@@ -69,7 +69,7 @@ export function OverviewPage() {
 
   const reset = () => {
     if (resetMutation.isPending || runMutation.isPending) return;
-    if (window.confirm("Reset the demo batch? Existing demo records will be replaced.")) {
+    if (window.confirm("Reset the demo data? Current demo records will be replaced.")) {
       resetMutation.mutate();
     }
   };
@@ -86,8 +86,8 @@ export function OverviewPage() {
       <PageState
         kind="loading"
         headingLevel="h1"
-        title="Loading overview"
-        description="Reading the latest batch and completed run metrics."
+         title="Loading summary…"
+        description="Getting the latest batch and run results."
       />
     );
   }
@@ -97,7 +97,7 @@ export function OverviewPage() {
       <PageState
         kind="error"
         headingLevel="h1"
-        title="Unable to load overview"
+        title="Could not load summary"
         description={overview.error.message}
         action={<RetryButton onClick={() => void overview.refetch()} />}
       />
@@ -110,8 +110,8 @@ export function OverviewPage() {
       <PageState
         kind="error"
         headingLevel="h1"
-        title="Overview data is unavailable"
-        description="The API returned no overview payload."
+        title="Summary is not available"
+        description="No summary data was returned."
       />
     );
   }
@@ -124,8 +124,8 @@ export function OverviewPage() {
         <div className="flex flex-col justify-between gap-4 border-b border-border pb-6 sm:flex-row sm:items-end">
           <div>
             <h1 className="text-3xl font-semibold tracking-tight">Overview</h1>
-            <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-              The control plane for deterministic payment reconciliation.
+             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+               See the latest results, evidence, and items that need review.
             </p>
           </div>
           <OverviewActions
@@ -139,21 +139,21 @@ export function OverviewPage() {
         </div>
         <PageState
           kind="empty"
-          title="No completed reconciliation yet"
+           title="No completed run yet"
           description={
             activeBatch
-              ? `Batch ${activeBatch.batchId} is ready. Run the deterministic policy to generate evidence and metrics.`
-              : "Reset the seeded demo to create a reviewable batch, then run reconciliation."
+               ? `Batch ${activeBatch.batchId} is ready. Run reconciliation to see the results and evidence.`
+               : "Reset the demo data, then run reconciliation to see the results."
           }
         />
         {resetMutation.isError && (
-          <p className="text-sm text-rose-200" role="alert">
-            Demo reset failed: {resetMutation.error.message}
+           <p className="text-sm text-danger" role="alert">
+             Could not reset demo data: {resetMutation.error.message}
           </p>
         )}
         {runMutation.isError && (
-          <p className="text-sm text-rose-200" role="alert">
-            Reconciliation failed: {runMutation.error.message}
+           <p className="text-sm text-danger" role="alert">
+              Could not run reconciliation: {runMutation.error.message}
           </p>
         )}
       </div>
@@ -167,8 +167,8 @@ export function OverviewPage() {
       <div className="flex flex-col justify-between gap-4 border-b border-border pb-6 xl:flex-row xl:items-end">
         <div>
           <h1 className="text-3xl font-semibold tracking-tight">Overview</h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-            One run, one evidence trail, and a clear boundary between autonomous matches and review.
+           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
+             See the latest results, evidence, and items that need review.
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
@@ -176,11 +176,11 @@ export function OverviewPage() {
             variant="outline"
             className={
               metrics.benchmarkAvailable
-                ? "border-emerald-400/30 bg-emerald-400/10 text-emerald-300"
-                : "border-amber-400/30 bg-amber-400/10 text-amber-200"
+                 ? "border-success/30 bg-success/10 text-success"
+                 : "border-warning/30 bg-warning/10 text-warning"
             }
           >
-            {metrics.benchmarkAvailable ? "Benchmark available" : "Benchmark unavailable"}
+             {metrics.benchmarkAvailable ? "Seeded benchmark available" : "Benchmark unavailable"}
           </Badge>
           {activeBatch && <StatusBadge value={activeBatch.status} />}
           <OverviewActions
@@ -195,44 +195,50 @@ export function OverviewPage() {
       </div>
 
       {resetMutation.isError && (
-        <p className="text-sm text-rose-200" role="alert">
-          Demo reset failed: {resetMutation.error.message}
+         <p className="text-sm text-danger" role="alert">
+           Could not reset demo data: {resetMutation.error.message}
         </p>
       )}
       {runMutation.isError && (
-        <p className="text-sm text-rose-200" role="alert">
-          Reconciliation failed: {runMutation.error.message}
+         <p className="text-sm text-danger" role="alert">
+            Could not run reconciliation: {runMutation.error.message}
         </p>
       )}
 
-      <section className="grid overflow-hidden rounded-xl border border-border bg-card sm:grid-cols-2 xl:grid-cols-5" aria-label="Run metrics">
+       {metrics.benchmarkAvailable && (
+         <p className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
+           These scores measure the fixed synthetic demo dataset. They are not production accuracy estimates or guarantees.
+         </p>
+       )}
+
+        <section className="grid overflow-hidden rounded-xl border border-border bg-card sm:grid-cols-2 xl:grid-cols-5" aria-label="Run summary">
         <MetricCard
-          label="Match rate"
+          label="Benchmark match rate"
           value={formatPercent(metrics.matchRate)}
-          detail={`${formatInteger(metrics.correctlyResolved)} of ${formatInteger(metrics.matchableCases)} matchable cases`}
+           detail={`${formatInteger(metrics.correctlyResolved)} of ${formatInteger(metrics.matchableCases)} cases matched`}
           tone="positive"
         />
         <MetricCard
-          label="Precision"
+          label="Benchmark precision"
           value={formatPercent(metrics.precision)}
-          detail={`${formatInteger(metrics.falsePositives)} false positives`}
+           detail={`${formatInteger(metrics.falsePositives)} incorrect matches`}
           tone={metrics.falsePositives === 0 ? "positive" : "warning"}
         />
         <MetricCard
-          label="Autonomous rate"
+            label="End-to-end autonomous resolution"
           value={formatPercent(metrics.endToEndAutonomyRate)}
-          detail={`${formatInteger(metrics.autonomousCases)} autonomous cases`}
+            detail={`${formatInteger(metrics.autonomousCases)} cases resolved automatically`}
         />
         <MetricCard
-          label="Open exceptions"
+           label="Needs review"
           value={formatInteger(metrics.openExceptions)}
-          detail={`${formatInteger(metrics.financiallyUnresolvedCases)} financially unresolved`}
+           detail={`${formatInteger(metrics.financiallyUnresolvedCases)} cases still unresolved`}
           tone={metrics.openExceptions === 0 ? "positive" : "warning"}
         />
         <MetricCard
-          label="Records processed"
+           label="Records checked"
           value={formatInteger(metrics.recordsProcessed)}
-          detail={`${formatDuration(metrics.durationMs)} deterministic duration`}
+           detail={`${formatDuration(metrics.durationMs)} to check them`}
         />
       </section>
 
@@ -240,26 +246,26 @@ export function OverviewPage() {
         <div className="rounded-xl border border-border bg-card p-5">
           <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
             <div>
-              <h2 className="text-base font-semibold">Scenario performance</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Per-class match rate and precision from the persisted evaluation report.
+                <h2 className="text-base font-semibold">Seeded benchmark by case type</h2>
+               <p className="mt-1 text-sm text-muted-foreground">
+                  Scores against hidden truth in the fixed synthetic dataset.
               </p>
             </div>
             {metrics.runId && (
               <Button variant="link" size="sm" onClick={() => navigate(`/runs/${metrics.runId}`)}>
-                Open run
+                 View run
               </Button>
             )}
           </div>
           {scenarios.length === 0 ? (
             <div className="mt-6 rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
-              Scenario metrics are not available for this batch.
+               No case-type results are available for this run.
             </div>
           ) : (
             <div className="mt-6 h-64 w-full">
               {typeof ResizeObserver === "undefined" ? (
                 <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
-                  Scenario chart requires a measurable browser viewport.
+                   The chart is not available in this browser.
                 </div>
               ) : (
                 <ResponsiveContainer width="100%" height="100%">
@@ -279,18 +285,18 @@ export function OverviewPage() {
                       tickLine={false}
                     />
                     <Tooltip
-                      cursor={{ fill: "rgba(96, 215, 231, 0.06)" }}
-                      contentStyle={{
-                        background: "#0d1b2b",
-                        border: "1px solid #1a344b",
-                        borderRadius: "8px",
-                        color: "#e8f0f7",
-                      }}
+                       cursor={{ fill: "var(--muted)" }}
+                       contentStyle={{
+                         background: "var(--popover)",
+                         border: "1px solid var(--border)",
+                         borderRadius: "8px",
+                         color: "var(--popover-foreground)",
+                       }}
                       formatter={(value) => [formatPercent(typeof value === "number" ? value : null), "Rate"]}
                       labelFormatter={(label) => humanizeStatus(String(label))}
                     />
-                    <Bar dataKey="matchRate" name="Match rate" fill="#60d7e7" radius={[3, 3, 0, 0]} />
-                    <Bar dataKey="precision" name="Precision" fill="#6ee7a0" radius={[3, 3, 0, 0]} />
+                     <Bar dataKey="matchRate" name="Match rate" fill="var(--chart-1)" radius={[3, 3, 0, 0]} />
+                     <Bar dataKey="precision" name="Precision" fill="var(--chart-2)" radius={[3, 3, 0, 0]} />
                   </BarChart>
                 </ResponsiveContainer>
               )}
@@ -299,23 +305,23 @@ export function OverviewPage() {
         </div>
 
         <div className="rounded-xl border border-border bg-card p-5">
-          <h2 className="text-base font-semibold">Money position</h2>
-          <p className="mt-1 text-sm text-muted-foreground">Values reported in integer INR paise.</p>
+          <h2 className="text-base font-semibold">Money summary</h2>
+          <p className="mt-1 text-sm text-muted-foreground">Amounts are shown in INR.</p>
           <dl className="mt-6 divide-y divide-border">
             <div className="flex items-baseline justify-between gap-4 py-3 first:pt-0">
-              <dt className="text-sm text-muted-foreground">Money reconciled</dt>
-              <dd className="font-mono text-sm font-semibold tabular-nums text-emerald-300">{formatInr(metrics.moneyReconciled)}</dd>
+               <dt className="text-sm text-muted-foreground">Money reconciled</dt>
+               <dd className="font-mono text-sm font-semibold tabular-nums text-success">{formatInr(metrics.moneyReconciled)}</dd>
             </div>
             <div className="flex items-baseline justify-between gap-4 py-3">
-              <dt className="text-sm text-muted-foreground">Money unresolved</dt>
-              <dd className="font-mono text-sm font-semibold tabular-nums text-amber-200">{formatInr(metrics.moneyUnresolved)}</dd>
+               <dt className="text-sm text-muted-foreground">Money unresolved</dt>
+               <dd className="font-mono text-sm font-semibold tabular-nums text-warning">{formatInr(metrics.moneyUnresolved)}</dd>
             </div>
             <div className="flex items-baseline justify-between gap-4 py-3">
-              <dt className="text-sm text-muted-foreground">Settlement net</dt>
+              <dt className="text-sm text-muted-foreground">Net settlement</dt>
               <dd className="font-mono text-sm font-semibold tabular-nums">{formatInr(metrics.settlementNet)}</dd>
             </div>
             <div className="flex items-baseline justify-between gap-4 py-3 last:pb-0">
-              <dt className="text-sm text-muted-foreground">Throughput</dt>
+              <dt className="text-sm text-muted-foreground">Speed</dt>
               <dd className="font-mono text-sm font-semibold tabular-nums">{formatDecimal(metrics.throughput)} records/s</dd>
             </div>
           </dl>
@@ -325,16 +331,16 @@ export function OverviewPage() {
       <section className="grid gap-4 border-t border-border pt-6 sm:grid-cols-2">
         <div>
           <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Current batch</p>
-          <p className="mt-2 font-mono text-sm text-foreground">{activeBatch?.batchId ?? "Not available"}</p>
+          <p className="mt-2 font-mono text-sm text-foreground">{activeBatch?.batchId ?? "No batch"}</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            {activeBatch?.seed ?? "No seeded batch has been created"} · {formatDateTime(activeBatch?.completedAt)}
+            {activeBatch?.seed ?? "No demo batch yet"} · {formatDateTime(activeBatch?.completedAt)}
           </p>
         </div>
         <div>
-          <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Run identity</p>
+           <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Run ID</p>
           <p className="mt-2 font-mono text-sm text-foreground">{metrics.runId}</p>
           <p className="mt-1 text-sm text-muted-foreground">
-            Report version {metrics.reportVersion} · {metrics.acceptancePassed ? "acceptance passed" : "acceptance not passed"}
+             Report version {metrics.reportVersion} · {metrics.acceptancePassed ? "checks passed" : "checks not met"}
           </p>
         </div>
       </section>

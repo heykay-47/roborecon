@@ -17,6 +17,25 @@ from app.reconciliation.model import EngineOutcome
 from app.reconciliation.service import RunAlreadyRunning
 
 
+@pytest.mark.parametrize(
+    ("status", "message"),
+    [
+        (ResultStatus.matched, "A possible match was found, but it needs review."),
+        (ResultStatus.ambiguous, "More than one possible match was found. Review the evidence."),
+        (ResultStatus.duplicate, "More than one source record matched. Review the evidence."),
+        (ResultStatus.missing_razorpay, "No matching Razorpay record was found."),
+        (ResultStatus.missing_ledger, "No matching ledger record was found."),
+        (ResultStatus.missing_settlement, "No matching settlement was found."),
+        (ResultStatus.missing_bank_credit, "No matching bank credit was found."),
+        (ResultStatus.amount_mismatch, "The amounts do not match. Review the evidence."),
+        (ResultStatus.malformed, "This source record could not be read. Review the source data."),
+        (ResultStatus.confirmed_no_match, "No match was confirmed. Review the evidence."),
+    ],
+)
+def test_exception_messages_are_plain_language(status, message):
+    assert service._exception_message(status) == message
+
+
 class _ExecuteResult:
     def __init__(self, value=None):
         self.value = value
@@ -204,3 +223,30 @@ def test_non_autonomous_stage_a_persists_source_links_and_exception(monkeypatch)
     }
     assert all(link.autonomous is False for link in links)
     assert len(exceptions) == 1
+    assert exceptions[0].message == "More than one possible match was found. Review the evidence."
+
+
+@pytest.mark.asyncio
+async def test_quarantined_rows_use_plain_language_exception_message(monkeypatch):
+    session, batch = _session()
+    _, source_rows, source_counts = _empty_snapshot(batch)
+    source_rows["quarantine"] = [SimpleNamespace()]
+    source_counts["quarantined"] = 1
+    monkeypatch.setattr(
+        service,
+        "_load_snapshot",
+        AsyncMock(return_value=(batch, source_rows, source_counts)),
+    )
+    monkeypatch.setattr(service, "_audit", AsyncMock())
+    monkeypatch.setattr(service, "reconcile_stage_a", MagicMock(return_value=[]))
+    monkeypatch.setattr(service, "reconcile_stage_b", MagicMock(return_value=[]))
+
+    await service.run_reconciliation(session, batch.id)
+
+    exceptions = [
+        call.args[0]
+        for call in session.add.call_args_list
+        if getattr(call.args[0], "exception_type", None) == "malformed"
+    ]
+    assert len(exceptions) == 1
+    assert exceptions[0].message == "This source record could not be read. Review the source data."

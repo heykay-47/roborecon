@@ -13,7 +13,9 @@ from app.common.money import calculate_fee, calculate_gst
 
 DEMO_NAMESPACE = UUID("d8bddbbf-b8a5-58c0-b9a4-cce2f21ed471")
 BASE_TIME = datetime(2026, 8, 1, 9, 0, tzinfo=timezone.utc)
-DEFAULT_SEED = "razorrecon-v1"
+DEFAULT_SEED = "roborecon-v1"
+_ADVERSARIAL_REFERENCE_TARGETS = {9: 10, 10: 9, 20: 108, 108: 20}
+_EQUAL_AMOUNT_SOURCES = {10: 9, 108: 20}
 
 
 def stable_id(kind: str, key: str) -> UUID:
@@ -158,7 +160,8 @@ def _business_time(index: int, *, offset_days: int = 0) -> datetime:
 
 
 def _amount(index: int) -> int:
-    return 10_000 + ((index * 7_919) % 190_000)
+    source_index = _EQUAL_AMOUNT_SOURCES.get(index, index)
+    return 10_000 + ((source_index * 7_919) % 190_000)
 
 
 def _scenario_tags(index: int) -> tuple[str, ...]:
@@ -269,6 +272,14 @@ def build_demo_dataset(seed: str = DEFAULT_SEED) -> DemoDataset:
         else:
             reference = f"INV-{index:04d}"
             receipt = f"checkout-{index:04d}"
+        target_index = _ADVERSARIAL_REFERENCE_TARGETS.get(index)
+        if target_index is not None:
+            reference = _seeded_provider_id(
+                seed,
+                "pay",
+                "razorpay-payment",
+                f"case-{target_index:03d}",
+            )
 
         ledger_entry = LedgerEntrySeed(
             id=ledger_id,

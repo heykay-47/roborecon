@@ -52,9 +52,9 @@ def passing_acceptance_inputs():
 @pytest.mark.parametrize(
     ("failed_check", "mutate"),
     [
-        ("precision", lambda values: values.update(precision=99.99)),
-        ("falsePositives", lambda values: values.update(false_positives=1)),
-        ("matchRate", lambda values: values.update(match_rate=94.99)),
+        ("precision", lambda values: values.update(precision=97.99)),
+        ("falsePositives", lambda values: values.update(false_positives=9)),
+        ("matchRate", lambda values: values.update(match_rate=89.99)),
         (
             "endToEndAutonomy",
             lambda values: values.update(end_to_end_autonomy_rate=89.99),

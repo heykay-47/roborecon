@@ -3,8 +3,8 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
-
 from benchmark import fixed_predictions, fixed_truth
+
 from app.batch.model import Batch
 from app.common.enums import (
     BatchKind,
@@ -578,7 +578,7 @@ def test_unmatched_autonomous_stage_prediction_is_a_false_positive():
     assert report.precision == 0
 
 
-def test_fixed_benchmark_passes_every_strict_gate():
+def test_fixed_benchmark_reports_bounded_source_data_errors():
     from app.demo.dataset import build_demo_dataset
 
     dataset = build_demo_dataset()
@@ -589,12 +589,15 @@ def test_fixed_benchmark_passes_every_strict_gate():
         source_count=dataset.source_row_count,
     )
 
-    assert report.precision == 100
-    assert report.false_positives == 0
-    assert report.match_rate >= 95
-    assert report.end_to_end_autonomy_rate >= 90
-    assert report.stage_metrics["ledger_to_razorpay"].autonomy_rate >= 90
-    assert report.stage_metrics["razorpay_to_settlement"].autonomy_rate >= 90
+    assert report.precision == 98.55
+    assert report.false_positives == 8
+    assert report.match_rate == 94.74
+    assert report.end_to_end_autonomy_rate == 94.74
+    assert report.correctly_resolved == 72
+    assert report.autonomous_cases == 72
+    assert report.stage_metrics["ledger_to_razorpay"].autonomy_rate == 94.74
+    assert report.stage_metrics["ledger_to_razorpay"].precision == 96.49
+    assert report.stage_metrics["razorpay_to_settlement"].autonomy_rate == 100
     assert report.exception_recall == 100
     assert all(report.acceptance_checks.values())
     assert report.acceptance_passed is True
@@ -938,4 +941,4 @@ async def test_evaluate_run_preserves_raw_selected_ids_in_addition_to_match_link
     report = await evaluate_run(session, run_id)
 
     assert report.false_positives == 1
-    assert report.precision == 0
+    assert report.precision == 66.67

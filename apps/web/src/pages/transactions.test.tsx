@@ -34,9 +34,9 @@ describe("TransactionsPage", () => {
     renderWithProviders(<TransactionsPage />);
     await screen.findByText("ORD-001");
 
-    fireEvent.change(screen.getByLabelText("Source type"), { target: { value: "ledger" } });
+    fireEvent.change(screen.getByLabelText("Record type"), { target: { value: "ledger" } });
     fireEvent.change(screen.getByLabelText("Status"), { target: { value: "payment" } });
-    fireEvent.change(screen.getByLabelText("Reconciliation state"), { target: { value: "matched" } });
+    fireEvent.change(screen.getByLabelText("Match state"), { target: { value: "matched" } });
 
     await waitFor(() => {
       const requests = fetchSpy.mock.calls.map(([input]) => String(input));
@@ -75,8 +75,9 @@ describe("TransactionsPage", () => {
 
     renderWithProviders(<TransactionsPage />);
 
-    expect(await screen.findByText("Missing receipt")).toBeInTheDocument();
-    expect(screen.getByText("Malformed row")).toBeInTheDocument();
+    expect(await screen.findByText("This source record could not be read. Review the source data.")).toBeInTheDocument();
+    expect(screen.queryByText("Missing receipt")).not.toBeInTheDocument();
+    expect(screen.getByText("Invalid row")).toBeInTheDocument();
     expect(screen.getByRole("link", { name: /run-001/i })).toHaveAttribute("href", "/runs/run-001");
     expect(screen.getByRole("link", { name: /result-001/i })).toHaveAttribute("href", "/runs/run-001#result-result-001");
     expect(screen.getByRole("link", { name: /exception-001/i })).toHaveAttribute("href", "/exceptions/exception-001");
@@ -89,7 +90,7 @@ describe("TransactionsPage", () => {
 
     renderWithProviders(<TransactionsPage />);
 
-    await screen.findByText("No transactions match these filters.");
+    await screen.findByText("No records match these filters.");
     for (const label of [
       "Attempted",
       "Pending",
@@ -140,7 +141,7 @@ describe("TransactionsPage", () => {
     await screen.findByText("ORD-001");
     fireEvent.click(screen.getByRole("button", { name: /next page/i }));
 
-    expect(await screen.findByRole("status", { name: "Updating transactions" })).toBeInTheDocument();
+    expect(await screen.findByRole("status", { name: "Updating records…" })).toBeInTheDocument();
     expect(fetchSpy).toHaveBeenCalled();
     resolveNextPage?.(response({ items: [{ ...row, reference: "ORD-002" }], total: 51, page: 2, pageSize: 25 }));
     expect(await screen.findByText("ORD-002")).toBeInTheDocument();

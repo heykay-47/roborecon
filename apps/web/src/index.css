@@ -4,38 +4,86 @@
 @import "@fontsource-variable/geist";
 
 :root {
-  --background: #07111f;
-  --foreground: #e8f0f7;
-  --card: #0d1b2b;
-  --card-foreground: #e8f0f7;
-  --popover: #0d1b2b;
-  --popover-foreground: #e8f0f7;
-  --primary: #60d7e7;
-  --primary-foreground: #031219;
-  --secondary: #132438;
-  --secondary-foreground: #dce8f2;
-  --muted: #132438;
-  --muted-foreground: #8ca2b7;
-  --accent: #173049;
-  --accent-foreground: #e8f0f7;
-  --destructive: #f18b9a;
-  --border: #1a344b;
-  --input: #1a344b;
-  --ring: #60d7e7;
-  --chart-1: #60d7e7;
-  --chart-2: #6ee7a0;
-  --chart-3: #f2c66d;
-  --chart-4: #a895f5;
-  --chart-5: #f18b9a;
+  --background: #f5f2ec;
+  --foreground: #24221d;
+  --card: #fffdfa;
+  --card-foreground: #24221d;
+  --popover: #fffdfa;
+  --popover-foreground: #24221d;
+  --primary: #ad4d14;
+  --primary-foreground: #fffaf2;
+  --secondary: #e8e1d7;
+  --secondary-foreground: #3a3229;
+  --muted: #ece7df;
+  --muted-foreground: #6a6258;
+  --accent: #f1dfca;
+  --accent-foreground: #65300f;
+  --destructive: #b83e36;
+  --border: #d8d0c5;
+  --input: #c8bfb3;
+  --ring: #ad4d14;
+  --success: #286b43;
+  --warning: #9b5e10;
+  --danger: #b83e36;
+  --neutral: #62676b;
+  --duplicate: #77528f;
+  --chart-1: #ad4d14;
+  --chart-2: #3f7b58;
+  --chart-3: #b77b26;
+  --chart-4: #785a8f;
+  --chart-5: #b83e36;
   --radius: 0.6rem;
-  --sidebar: #081522;
-  --sidebar-foreground: #e8f0f7;
-  --sidebar-primary: #60d7e7;
-  --sidebar-primary-foreground: #031219;
-  --sidebar-accent: #132438;
-  --sidebar-accent-foreground: #e8f0f7;
-  --sidebar-border: #1a344b;
-  --sidebar-ring: #60d7e7;
+  --sidebar: #eae4da;
+  --sidebar-foreground: #24221d;
+  --sidebar-primary: #ad4d14;
+  --sidebar-primary-foreground: #fffaf2;
+  --sidebar-accent: #ded5c8;
+  --sidebar-accent-foreground: #3a3229;
+  --sidebar-border: #d0c6b8;
+  --sidebar-ring: #ad4d14;
+  --scrollbar-thumb: #b8aea1;
+  --scrollbar-track: #e9e3d9;
+}
+
+.dark {
+  --background: #151412;
+  --foreground: #f3eee5;
+  --card: #1d1b17;
+  --card-foreground: #f3eee5;
+  --popover: #222018;
+  --popover-foreground: #f3eee5;
+  --primary: #e3a064;
+  --primary-foreground: #29170d;
+  --secondary: #2b2721;
+  --secondary-foreground: #eee5d7;
+  --muted: #2a2721;
+  --muted-foreground: #b7ad9f;
+  --accent: #3a2d23;
+  --accent-foreground: #f3c69f;
+  --destructive: #f08c80;
+  --border: #3b352d;
+  --input: #453d33;
+  --ring: #e3a064;
+  --success: #78d59b;
+  --warning: #e6b16d;
+  --danger: #f08c80;
+  --neutral: #b4b8bb;
+  --duplicate: #caa2e3;
+  --chart-1: #e3a064;
+  --chart-2: #78d59b;
+  --chart-3: #e6b16d;
+  --chart-4: #caa2e3;
+  --chart-5: #f08c80;
+  --sidebar: #191814;
+  --sidebar-foreground: #f3eee5;
+  --sidebar-primary: #e3a064;
+  --sidebar-primary-foreground: #29170d;
+  --sidebar-accent: #29251f;
+  --sidebar-accent-foreground: #f3eee5;
+  --sidebar-border: #342f28;
+  --sidebar-ring: #e3a064;
+  --scrollbar-thumb: #5a5146;
+  --scrollbar-track: #201e1a;
 }
 
 @custom-variant dark (&:is(.dark *));
@@ -64,6 +112,11 @@
   --color-accent: var(--accent);
   --color-muted-foreground: var(--muted-foreground);
   --color-muted: var(--muted);
+  --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-danger: var(--danger);
+  --color-neutral: var(--neutral);
+  --color-duplicate: var(--duplicate);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-secondary: var(--secondary);
   --color-primary-foreground: var(--primary-foreground);
@@ -87,6 +140,11 @@
 
   html {
     @apply font-sans;
+    color-scheme: light;
+    background: var(--background);
+  }
+
+  html.dark {
     color-scheme: dark;
   }
 
@@ -98,13 +156,18 @@
   }
 
   ::selection {
-    background: #60d7e7;
-    color: #031219;
+    background: var(--primary);
+    color: var(--primary-foreground);
   }
 
   :focus-visible {
-    outline: 2px solid #60d7e7;
+    outline: 2px solid var(--ring);
     outline-offset: 2px;
+  }
+
+  input[type="checkbox"],
+  input[type="radio"] {
+    accent-color: var(--primary);
   }
 }
 
@@ -122,7 +185,7 @@
 }
 
 * {
-  scrollbar-color: #31536d #081522;
+  scrollbar-color: var(--scrollbar-thumb) var(--scrollbar-track);
   scrollbar-width: thin;
 }
 

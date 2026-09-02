@@ -115,8 +115,12 @@ describe("runs routes", () => {
       { route: "/runs/run-001" },
     );
 
-    expect(await screen.findByText("Acceptance checks")).toBeInTheDocument();
-    expect(screen.getByText("Exact Id")).toBeInTheDocument();
+    expect(await screen.findByText("Seeded benchmark checks")).toBeInTheDocument();
+    expect(screen.getByText("Exact ID")).toBeInTheDocument();
+    expect(screen.getByText("Money reconciled")).toBeInTheDocument();
+    expect(screen.getByText("Money unresolved")).toBeInTheDocument();
+    expect(screen.getByText("Throughput")).toBeInTheDocument();
+    expect(screen.getByText("225.54 records/s")).toBeInTheDocument();
     expect(screen.getAllByText("100.0%", { exact: false }).length).toBeGreaterThan(0);
     expect(document.getElementById("result-result-001")).toBeInTheDocument();
   });
@@ -136,7 +140,7 @@ describe("runs routes", () => {
     renderWithProviders(<RunsPage />, { route: "/runs" });
     fireEvent.click(await screen.findByRole("button", { name: /next page/i }));
 
-    expect(await screen.findByRole("status", { name: "Updating runs" })).toBeInTheDocument();
+    expect(await screen.findByRole("status", { name: "Updating run list…" })).toBeInTheDocument();
     resolveNextPage?.(new Response(JSON.stringify({ items: [{ ...run, runId: "run-002" }], total: 51, page: 2, pageSize: 25 })));
     expect(await screen.findByText("run-002")).toBeInTheDocument();
   });

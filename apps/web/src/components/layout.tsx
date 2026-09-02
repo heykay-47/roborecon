@@ -13,6 +13,8 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { useTheme } from "@/hooks/use-theme";
+import { ThemeToggle } from "@/components/theme-toggle";
 
 interface NavigationItem {
   to: string;
@@ -43,8 +45,8 @@ function NavigationLinks({ onNavigate }: { onNavigate: () => void }) {
             cn(
               "group flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
               isActive
-                ? "bg-cyan-300/10 text-cyan-200 ring-1 ring-cyan-300/20"
-                : "text-muted-foreground hover:bg-white/5 hover:text-foreground",
+                ? "bg-primary/10 text-primary ring-1 ring-primary/20"
+                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
             )
           }
         >
@@ -58,6 +60,7 @@ function NavigationLinks({ onNavigate }: { onNavigate: () => void }) {
 
 export function Layout() {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const { theme, toggleTheme } = useTheme();
   const [isMobile, setIsMobile] = useState(() =>
     typeof window !== "undefined" &&
     typeof window.matchMedia === "function" &&
@@ -127,6 +130,7 @@ export function Layout() {
       </a>
       <aside
         ref={sidebarRef}
+        aria-label="Workspace navigation"
         className={cn(
           "fixed inset-y-0 z-40 flex w-64 flex-col border-r border-border bg-sidebar px-4 py-5 transition-[left] lg:static lg:left-0",
           mobileOpen ? "left-0" : "-left-64",
@@ -136,7 +140,7 @@ export function Layout() {
       >
         <div className="flex items-center justify-between px-2">
           <div className="flex items-center gap-3">
-            <div className="flex size-8 items-center justify-center rounded-lg bg-cyan-300 text-xs font-black tracking-[-0.12em] text-background">
+            <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-xs font-black tracking-[-0.12em] text-primary-foreground">
               RR
             </div>
             <div>
@@ -149,7 +153,7 @@ export function Layout() {
           <button
             type="button"
             ref={closeRef}
-            className="flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-white/5 hover:text-foreground lg:hidden"
+            className="flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/5 hover:text-foreground lg:hidden"
             aria-label="Close navigation"
             onClick={() => setMobileOpen(false)}
           >
@@ -158,16 +162,16 @@ export function Layout() {
         </div>
 
         <div className="mt-10 px-2 text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-          Workspace
+          Menu
         </div>
         <div className="mt-3">
           <NavigationLinks onNavigate={() => setMobileOpen(false)} />
         </div>
 
         <div className="mt-auto border-t border-border px-2 pt-4">
-          <p className="text-xs font-medium text-foreground">Deterministic policy</p>
+          <p className="text-xs font-medium text-foreground">Matching rules</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Evidence first. Review when uncertain.
+            Rules decide matches. Review anything unclear.
           </p>
         </div>
       </aside>
@@ -175,7 +179,7 @@ export function Layout() {
       {mobileOpen && (
         <button
           type="button"
-          className="fixed inset-0 z-30 bg-slate-950/70 lg:hidden"
+          className="fixed inset-0 z-30 bg-black/70 lg:hidden"
           aria-label="Dismiss navigation"
           onClick={() => setMobileOpen(false)}
         />
@@ -187,7 +191,7 @@ export function Layout() {
             <button
               type="button"
               ref={toggleRef}
-              className="flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-white/5 hover:text-foreground lg:hidden"
+              className="flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/5 hover:text-foreground lg:hidden"
               aria-label="Toggle navigation"
               aria-expanded={mobileOpen}
               onClick={() => setMobileOpen((open) => !open)}
@@ -199,13 +203,14 @@ export function Layout() {
                 {currentItem?.label ?? "Overview"}
               </p>
               <p className="hidden text-xs text-muted-foreground sm:block">
-                Reconciliation control plane
+                Payment matching workspace
               </p>
             </div>
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
-            <span className="size-1.5 rounded-full bg-emerald-300" aria-hidden="true" />
-            Demo workspace
+            <ThemeToggle theme={theme} onToggle={toggleTheme} />
+            <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
+            Demo data
           </div>
         </header>
 

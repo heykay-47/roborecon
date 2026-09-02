@@ -179,6 +179,11 @@ class ReviewDecision(ApiModel):
     link_id: UUID | None = Field(default=None, serialization_alias="linkId")
 
 
+class AICitationResponse(ApiModel):
+    source_type: str
+    source_id: UUID
+
+
 class AIInvestigationResponse(ApiModel):
     investigation_id: UUID = Field(validation_alias="id", serialization_alias="investigationId")
     exception_id: UUID = Field(serialization_alias="exceptionId")
@@ -189,7 +194,7 @@ class AIInvestigationResponse(ApiModel):
     model: str | None
     recommendation: str
     confidence: int
-    citations: list[dict[str, Any]]
+    citations: list["AICitationResponse"]
     tool_trace: list[dict[str, Any]]
     error_code: str | None
     error_message: str | None

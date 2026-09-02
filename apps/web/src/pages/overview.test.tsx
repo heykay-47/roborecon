@@ -69,7 +69,7 @@ const batch: Batch = {
   batchId: "batch-001",
   kind: "demo",
   status: "completed",
-  seed: "razorrecon-v1",
+  seed: "roborecon-v1",
   groundTruthAvailable: true,
   sourceRowCount: 415,
   startedAt: "2026-08-26T09:00:00Z",
@@ -118,8 +118,14 @@ describe("OverviewPage", () => {
     expect(screen.getByText("99.1%", { exact: false })).toBeInTheDocument();
     expect(screen.getByText("₹1,25,430.00", { exact: false })).toBeInTheDocument();
     expect(screen.getByText("415", { exact: true })).toBeInTheDocument();
-    expect(screen.getByText("razorrecon-v1", { exact: false })).toBeInTheDocument();
-    expect(screen.getByText("Benchmark available")).toBeInTheDocument();
+    expect(screen.getByText("End-to-end autonomous resolution")).toBeInTheDocument();
+    expect(screen.getByText("Money reconciled")).toBeInTheDocument();
+    expect(screen.getByText("Money unresolved")).toBeInTheDocument();
+    expect(screen.getByText("roborecon-v1", { exact: false })).toBeInTheDocument();
+    expect(screen.getByText("Seeded benchmark available")).toBeInTheDocument();
+    expect(screen.getByText(/not production accuracy estimates or guarantees/i)).toBeInTheDocument();
+    expect(screen.getByText("Benchmark match rate")).toBeInTheDocument();
+    expect(screen.getByText("Benchmark precision")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /run reconciliation/i })).toBeEnabled();
   });
 
@@ -163,7 +169,7 @@ describe("OverviewPage", () => {
 
     const runButton = await screen.findByRole("button", { name: /run reconciliation/i });
     expect(runButton).toBeDisabled();
-    fireEvent.click(screen.getByRole("button", { name: /reset demo/i }));
+    fireEvent.click(screen.getByRole("button", { name: /reset demo data/i }));
 
     await waitFor(() => expect(runButton).toBeEnabled());
     fireEvent.click(runButton);
@@ -179,7 +185,7 @@ describe("OverviewPage", () => {
     const fetchSpy = vi.spyOn(globalThis, "fetch");
     fetchSpy.mockImplementation(() => new Promise(() => undefined));
     renderWithProviders(<OverviewPage />);
-    expect(screen.getByText("Loading overview")).toBeInTheDocument();
+    expect(screen.getByText("Loading summary…")).toBeInTheDocument();
   });
 
   it("renders an empty state when no completed run exists", async () => {
@@ -190,14 +196,14 @@ describe("OverviewPage", () => {
     });
 
     renderWithProviders(<OverviewPage />);
-    expect(await screen.findByText("No completed reconciliation yet")).toBeInTheDocument();
+    expect(await screen.findByText("No completed run yet")).toBeInTheDocument();
   });
 
   it("renders an error state when the metrics request fails", async () => {
     vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("network unavailable"));
 
     renderWithProviders(<OverviewPage />);
-    expect(await screen.findByText("Unable to load overview")).toBeInTheDocument();
+    expect(await screen.findByText("Could not load summary")).toBeInTheDocument();
   });
 
   it("does not show metrics from a run belonging to a different latest batch", async () => {
@@ -212,7 +218,7 @@ describe("OverviewPage", () => {
 
     renderWithProviders(<OverviewPage />);
 
-    expect(await screen.findByText("No completed reconciliation yet")).toBeInTheDocument();
+    expect(await screen.findByText("No completed run yet")).toBeInTheDocument();
     expect(screen.queryByText("96.4%", { exact: false })).not.toBeInTheDocument();
   });
 
@@ -235,11 +241,11 @@ describe("OverviewPage", () => {
     const confirm = vi.spyOn(window, "confirm").mockReturnValueOnce(false).mockReturnValueOnce(true);
 
     renderWithProviders(<OverviewPage />);
-    const resetButton = await screen.findByRole("button", { name: "Reset demo" });
+    const resetButton = await screen.findByRole("button", { name: "Reset demo data" });
     const runButton = screen.getByRole("button", { name: "Run reconciliation" });
 
     fireEvent.click(resetButton);
-    expect(confirm).toHaveBeenCalledWith("Reset the demo batch? Existing demo records will be replaced.");
+    expect(confirm).toHaveBeenCalledWith("Reset the demo data? Current demo records will be replaced.");
     expect(resetButton).toBeEnabled();
 
     fireEvent.click(resetButton);
@@ -265,7 +271,7 @@ describe("OverviewPage", () => {
 
     renderWithProviders(<OverviewPage />);
     const runButton = await screen.findByRole("button", { name: "Run reconciliation" });
-    const resetButton = screen.getByRole("button", { name: "Reset demo" });
+    const resetButton = screen.getByRole("button", { name: "Reset demo data" });
     fireEvent.click(runButton);
 
     await waitFor(() => expect(runButton).toBeDisabled());

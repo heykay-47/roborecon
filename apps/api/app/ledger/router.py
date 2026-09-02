@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.batch.model import IngestionRecord
 from app.common.api import ApiModel, PaginatedResponse
+from app.common.messages import MALFORMED_RECORD_MESSAGE
 from app.database import get_session
 from app.ledger.model import LedgerEntry
 from app.razorpay.model import RazorpayOrder, RazorpayPayment, RazorpayRefund
@@ -70,7 +71,11 @@ def _record(
         "business_at": business_at,
         "batch_id": batch_id,
         "reconciliation_state": "unreconciled",
-        "parse_error": parse_error,
+        "parse_error": (
+            MALFORMED_RECORD_MESSAGE
+            if source_type == "quarantine" or parse_error
+            else None
+        ),
         "run_id": None,
         "result_id": None,
         "exception_id": None,
@@ -400,7 +405,7 @@ async def _load_source_records(
             status=row.parse_status,
             business_at=None,
             batch_id=row.batch_id,
-            parse_error=row.parse_error,
+             parse_error=MALFORMED_RECORD_MESSAGE,
         ),
     )
 
