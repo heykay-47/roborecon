@@ -1,5 +1,81 @@
+from collections import Counter
+
+from app.common.enums import ResultStatus
 from app.common.money import calculate_fee, calculate_gst
 from app.demo.dataset import build_demo_dataset
+
+
+EXPECTED_PRIMARY_CLASSES = {
+    "standard": 20,
+    "exact_id": 6,
+    "fuzzy_reference": 14,
+    "date_shift": 10,
+    "fee_gst": 10,
+    "refund": 10,
+    "held_release": 6,
+    "duplicate": 8,
+    "ambiguous": 8,
+    "amount_mismatch": 8,
+    "missing_razorpay": 8,
+    "missing_settlement": 6,
+    "missing_bank_credit": 6,
+    "missing_ledger": 6,
+}
+
+
+def test_strict_benchmark_truth_contract():
+    dataset = build_demo_dataset()
+
+    assert Counter(case.scenario_class for case in dataset.truth_cases) == (
+        EXPECTED_PRIMARY_CLASSES
+    )
+    assert len(dataset.truth_cases) == 126
+    assert sum(case.matchable for case in dataset.truth_cases) == 76
+    assert sum(not case.matchable for case in dataset.truth_cases) == 50
+    assert all(
+        case.matchable is (case.expected_status is ResultStatus.matched)
+        for case in dataset.truth_cases
+    )
+
+    expected_exceptions = {
+        ResultStatus.duplicate: 8,
+        ResultStatus.ambiguous: 8,
+        ResultStatus.amount_mismatch: 8,
+        ResultStatus.missing_razorpay: 8,
+        ResultStatus.missing_settlement: 6,
+        ResultStatus.missing_bank_credit: 6,
+        ResultStatus.missing_ledger: 6,
+    }
+    assert Counter(
+        case.expected_status
+        for case in dataset.truth_cases
+        if not case.matchable
+    ) == expected_exceptions
+
+
+def test_positive_cases_have_source_visible_identity_evidence():
+    dataset = build_demo_dataset()
+    ledger_by_id = {row.id: row for row in dataset.ledger_entries}
+    payment_by_id = {row.id: row for row in dataset.razorpay_payments}
+    order_by_id = {row.id: row for row in dataset.razorpay_orders}
+
+    for case in dataset.truth_cases:
+        if not case.matchable:
+            continue
+        ledger = ledger_by_id[case.ledger_entry_id]
+        payment = payment_by_id[case.razorpay_payment_id]
+        order = order_by_id[case.razorpay_order_id]
+
+        assert payment.provider_order_id == order.provider_order_id
+        assert payment.amount == order.amount
+        assert payment.currency == order.currency == ledger.currency
+        assert order.status == "paid"
+        if case.scenario_class == "fuzzy_reference":
+            assert ledger.reference != payment.receipt
+            assert "INVOICE" in ledger.reference.upper()
+            assert "INVOICE" in payment.receipt.upper()
+        else:
+            assert ledger.reference == payment.receipt == order.receipt
 
 
 def test_fixed_dataset_contract():

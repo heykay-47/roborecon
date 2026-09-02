@@ -15,7 +15,9 @@ from app.evaluation.model import (
     EvaluationReport,
     GroundTruthLink,
     Prediction,
+    StageMetrics,
     TruthCase,
+    TruthSource,
 )
 from app.reconciliation.model import (
     MatchLink,
@@ -26,9 +28,25 @@ from app.reconciliation.model import (
 from app.settlement.model import Settlement
 
 
-MATCH_RATE_TARGET = 90.0
-AUTONOMOUS_RATE_TARGET = 65.0
+MATCH_RATE_TARGET = 95.0
+END_TO_END_AUTONOMY_TARGET = 90.0
+STAGE_CORRECTNESS_TARGET = 90.0
+CLASS_ACCURACY_TARGET = 90.0
+EXCEPTION_RECALL_TARGET = 100.0
 RUNTIME_LIMIT_MS = 5_000
+
+ACCEPTANCE_CHECK_KEYS = (
+    "benchmarkAvailable",
+    "precision",
+    "falsePositives",
+    "matchRate",
+    "endToEndAutonomy",
+    "stageACorrectness",
+    "stageBCorrectness",
+    "positiveClassAccuracy",
+    "exceptionRecall",
+    "runtime",
+)
 
 
 def _value(value: Any, *names: str, default: Any = None) -> Any:
@@ -76,6 +94,19 @@ def _ids(value: Any) -> tuple[str, ...]:
     return tuple(dict.fromkeys(result))
 
 
+def _truth_sources(value: Any) -> tuple[TruthSource, ...]:
+    raw_sources = _value(value, "sources", "ground_truth_links", default=()) or ()
+    sources = []
+    for item in raw_sources:
+        source_type = _value(item, "source_type", "sourceType")
+        source_id = _value(item, "source_id", "sourceId", "id")
+        if source_type is not None and source_id is not None:
+            sources.append(
+                TruthSource(source_type=str(source_type), source_id=str(source_id))
+            )
+    return tuple(dict.fromkeys(sources))
+
+
 def _truth_case(value: TruthCase | Mapping[str, Any] | Any, key: Any = None) -> TruthCase:
     case_id = _value(value, "case_id", "id", default=key)
     return TruthCase(
@@ -88,7 +119,7 @@ def _truth_case(value: TruthCase | Mapping[str, Any] | Any, key: Any = None) -> 
         expected_status=_string(
             _value(value, "expected_status", "expectedStatus", default="matched")
         ),
-        source_ids=_ids(value),
+        sources=_truth_sources(value),
     )
 
 
@@ -202,28 +233,198 @@ def _percentage(numerator: int, denominator: int) -> float:
     return round(numerator * 100 / denominator, 2)
 
 
+_REQUIRED_STAGES = {
+    "ledger_to_razorpay",
+    "razorpay_to_settlement",
+}
+_REQUIRED_STAGE_ORDER = (
+    "ledger_to_razorpay",
+    "razorpay_to_settlement",
+)
+
+
+def _case_status_correct(case: TruthCase, predictions: list[Prediction]) -> bool:
+    if not predictions:
+        return False
+    statuses = {_string(prediction.status) for prediction in predictions}
+    if case.expected_status != "matched":
+        return case.expected_status in statuses
+    if statuses != {"matched"}:
+        return False
+    if any(
+        prediction.stage is None
+        or _string(prediction.stage) not in _REQUIRED_STAGES
+        for prediction in predictions
+    ):
+        return False
+    stages = {_string(prediction.stage) for prediction in predictions}
+    return stages == _REQUIRED_STAGES
+
+
+def _case_source_coverage(case: TruthCase, predictions: list[Prediction]) -> bool:
+    expected_ids = set(case.source_ids)
+    selected_ids = {
+        source_id for prediction in predictions for source_id in prediction.selected_ids
+    }
+    return expected_ids.issubset(selected_ids) and selected_ids.issubset(expected_ids)
+
+
+def _case_has_selected_false_positive(
+    case: TruthCase, predictions: list[Prediction]
+) -> bool:
+    expected_ids = set(case.source_ids)
+    return any(
+        set(prediction.selected_ids).difference(expected_ids)
+        for prediction in predictions
+    )
+
+
+def _case_is_correct(case: TruthCase, predictions: list[Prediction]) -> bool:
+    if not _case_status_correct(case, predictions):
+        return False
+    if case.expected_status != "matched":
+        return True
+    if _case_has_selected_false_positive(case, predictions):
+        return False
+    return _case_source_coverage(case, predictions)
+
+
+def _case_is_autonomously_resolved(
+    case: TruthCase, predictions: list[Prediction]
+) -> bool:
+    return (
+        case.expected_status == "matched"
+        and _case_is_correct(case, predictions)
+        and bool(predictions)
+        and all(prediction.autonomous for prediction in predictions)
+    )
+
+
+def _case_is_financially_resolved(
+    case: TruthCase, predictions: list[Prediction]
+) -> bool:
+    if case.expected_status != "matched" or not _case_is_correct(case, predictions):
+        return False
+    return bool(predictions) and all(
+        prediction.autonomous or prediction.review_status == "approved"
+        for prediction in predictions
+    )
+
+
+def _autonomous_false_positive_count(
+    case: TruthCase | None, prediction: Prediction
+) -> int:
+    if not prediction.autonomous:
+        return 0
+    selected_ids = set(prediction.selected_ids)
+    if case is None:
+        return len(selected_ids) or 1
+    return len(selected_ids.difference(case.source_ids)) or int(not selected_ids)
+
+
+def _expected_stage_ids(case: TruthCase, stage: str) -> set[str]:
+    by_type: dict[str, set[str]] = defaultdict(set)
+    for source in case.sources:
+        by_type[source.source_type].add(source.source_id)
+    if stage == "ledger_to_razorpay":
+        provider_ids = by_type["razorpay_refund"] or by_type["razorpay_payment"]
+        return by_type["ledger"] | by_type["razorpay_order"] | provider_ids
+    if stage == "razorpay_to_settlement":
+        return (
+            by_type["razorpay_payment"]
+            | by_type["razorpay_refund"]
+            | by_type["settlement"]
+            | by_type["bank_credit"]
+        )
+    return set()
+
+
+def _stage_case_is_correct(
+    case: TruthCase, predictions: list[Prediction], stage: str
+) -> bool:
+    if not predictions:
+        return False
+    if case.expected_status != "matched":
+        return False
+    if any(_string(prediction.status) != "matched" for prediction in predictions):
+        return False
+    selected_ids = {
+        source_id for prediction in predictions for source_id in prediction.selected_ids
+    }
+    return selected_ids == _expected_stage_ids(case, stage)
+
+
+def _stage_case_is_autonomous(
+    case: TruthCase, predictions: list[Prediction], stage: str
+) -> bool:
+    return _stage_case_is_correct(case, predictions, stage) and all(
+        prediction.autonomous for prediction in predictions
+    )
+
+
+def _autonomous_stage_false_positive_count(
+    case: TruthCase | None, prediction: Prediction, stage: str
+) -> int:
+    if not prediction.autonomous:
+        return 0
+    selected_ids = set(prediction.selected_ids)
+    expected_ids = _expected_stage_ids(case, stage) if case is not None else set()
+    return len(selected_ids.difference(expected_ids)) or int(not selected_ids)
+
+
+def _exception_is_recalled(case: TruthCase, predictions: list[Prediction]) -> bool:
+    return not case.matchable and any(
+        not prediction.autonomous
+        and _string(prediction.status) == case.expected_status
+        for prediction in predictions
+    )
+
+
 def _acceptance_checks(
     *,
     benchmark_available: bool,
-    precision: float,
-    false_positives: int,
-    match_rate: float,
-    autonomous_resolution_rate: float,
+    precision: float | None,
+    false_positives: int | None,
+    match_rate: float | None,
+    end_to_end_autonomy_rate: float | None,
+    stage_a: StageMetrics | None,
+    stage_b: StageMetrics | None,
+    per_class: dict[str, ClassMetrics] | None,
+    exception_recall: float | None,
     duration_ms: int,
-    per_class: dict[str, ClassMetrics],
 ) -> dict[str, bool]:
-    checks = {
-        "benchmarkAvailable": benchmark_available,
-        "precision": precision >= 100.0,
-        "falsePositives": false_positives == 0,
-        "matchRate": match_rate >= MATCH_RATE_TARGET,
-        "autonomousResolution": autonomous_resolution_rate >= AUTONOMOUS_RATE_TARGET,
-        "runtime": duration_ms <= RUNTIME_LIMIT_MS,
-        "scenarioClasses": bool(per_class),
-    }
     if not benchmark_available:
-        return {key: False for key in checks}
-    return checks
+        return {key: False for key in ACCEPTANCE_CHECK_KEYS}
+    positive_classes = [
+        metrics
+        for metrics in (per_class or {}).values()
+        if metrics.matchable_cases > 0
+    ]
+    return {
+        "benchmarkAvailable": True,
+        "precision": precision == 100.0,
+        "falsePositives": false_positives == 0,
+        "matchRate": match_rate is not None and match_rate >= MATCH_RATE_TARGET,
+        "endToEndAutonomy": (
+            end_to_end_autonomy_rate is not None
+            and end_to_end_autonomy_rate >= END_TO_END_AUTONOMY_TARGET
+        ),
+        "stageACorrectness": (
+            stage_a is not None
+            and stage_a.correctness_rate >= STAGE_CORRECTNESS_TARGET
+        ),
+        "stageBCorrectness": (
+            stage_b is not None
+            and stage_b.correctness_rate >= STAGE_CORRECTNESS_TARGET
+        ),
+        "positiveClassAccuracy": bool(positive_classes)
+        and all(
+            metrics.match_rate >= CLASS_ACCURACY_TARGET
+            for metrics in positive_classes
+        ),
+        "exceptionRecall": exception_recall == EXCEPTION_RECALL_TARGET,
+        "runtime": duration_ms <= RUNTIME_LIMIT_MS,
+    }
 
 
 def evaluate_predictions(
@@ -243,34 +444,25 @@ def evaluate_predictions(
         if prediction.case_id is not None:
             predictions_by_case[prediction.case_id].append(prediction)
 
-    false_positives = 0
     autonomous_links = 0
-    autonomous_cases: set[str] = set()
+    false_positive_total = 0
     open_exceptions = 0
     settlement_net = 0
     settlement_seen: set[tuple[str | None, int]] = set()
     reviewed_cases: dict[str, str] = {}
 
-    per_class_counts: dict[str, dict[str, int]] = defaultdict(
-        lambda: defaultdict(int)
-    )
+    per_class_counts: dict[str, dict[str, int]] = defaultdict(lambda: defaultdict(int))
     correctly_resolved_cases: set[str] = set()
+    autonomously_resolved_cases: set[str] = set()
     financially_resolved_cases: set[str] = set()
+    recalled_exception_cases: set[str] = set()
 
     for prediction in prediction_values:
         case = truth_by_id.get(prediction.case_id or "")
-        expected_ids = set(case.source_ids) if case is not None else set()
         if prediction.autonomous:
-            selected_ids = set(prediction.selected_ids)
-            autonomous_links += max(1, len(selected_ids))
-            if prediction.case_id is not None:
-                autonomous_cases.add(prediction.case_id)
-            wrong_ids = selected_ids.difference(expected_ids)
-            false_positives += len(wrong_ids) or (1 if not selected_ids else 0)
-        if not prediction.autonomous and prediction.review_status not in {
-            "approved",
-            "rejected",
-        }:
+            autonomous_links += len(prediction.selected_ids)
+            false_positive_total += _autonomous_false_positive_count(case, prediction)
+        if not prediction.autonomous and prediction.review_status not in {"approved", "rejected"}:
             open_exceptions += 1
         if prediction.review_status in {"approved", "rejected"} and prediction.case_id:
             reviewed_cases[prediction.case_id] = prediction.review_status
@@ -285,24 +477,18 @@ def evaluate_predictions(
         class_counts["cases"] += 1
         class_counts["matchable_cases"] += int(case.matchable)
         case_predictions = predictions_by_case.get(case.case_id, [])
-        statuses = {_string(prediction.status) for prediction in case_predictions}
-        auto_predictions = [
-            prediction for prediction in case_predictions if prediction.autonomous
-        ]
-        case_has_false_positive = any(
-            set(prediction.selected_ids).difference(case.source_ids)
-            or (prediction.autonomous and not prediction.selected_ids)
-            for prediction in auto_predictions
-        )
-        status_correct = case.expected_status in statuses
-        review_status = reviewed_cases.get(case.case_id)
-        review_resolved = review_status == "approved"
-        resolved = (status_correct and not case_has_false_positive) or review_resolved
+        resolved = case.matchable and _case_is_correct(case, case_predictions)
+        autonomously_resolved = _case_is_autonomously_resolved(case, case_predictions)
+        financially_resolved = _case_is_financially_resolved(case, case_predictions)
+        if _exception_is_recalled(case, case_predictions):
+            recalled_exception_cases.add(case.case_id)
         if resolved:
             correctly_resolved_cases.add(case.case_id)
-        if (auto_predictions and not case_has_false_positive) or review_resolved:
+        if autonomously_resolved:
+            autonomously_resolved_cases.add(case.case_id)
+        if financially_resolved:
             financially_resolved_cases.add(case.case_id)
-        if case.matchable and not financially_resolved_cases.intersection({case.case_id}):
+        if case.matchable and not financially_resolved:
             class_counts["financially_unresolved_cases"] += 1
         class_counts["open_exceptions"] += sum(
             not prediction.autonomous
@@ -311,11 +497,9 @@ def evaluate_predictions(
         )
         if resolved:
             class_counts["correctly_resolved"] += 1
-        class_counts["autonomous_cases"] += int(
-            bool(auto_predictions and not case_has_false_positive)
-        )
+        class_counts["autonomous_cases"] += int(autonomously_resolved)
         amount = case.amount
-        if financially_resolved_cases.intersection({case.case_id}):
+        if financially_resolved:
             class_counts["money_reconciled"] += amount
         else:
             class_counts["money_unresolved"] += amount
@@ -323,100 +507,156 @@ def evaluate_predictions(
     if open_exception_count is not None:
         open_exceptions = open_exception_count
 
-    matchable_cases = sum(case.matchable for case in truth_cases)
-    correctly_resolved = sum(
+    matchable_cases_value = sum(case.matchable for case in truth_cases)
+    correctly_resolved_value = sum(
         case.case_id in correctly_resolved_cases for case in truth_cases if case.matchable
     )
-    money_reconciled = sum(
+    money_reconciled_value = sum(
         case.amount for case in truth_cases if case.case_id in financially_resolved_cases
     )
-    money_unresolved = sum(
+    money_unresolved_value = sum(
         case.amount for case in truth_cases if case.case_id not in financially_resolved_cases
     )
     records_processed = source_count if source_count is not None else len(prediction_values)
     duration_ms = max(0, int(duration_ms))
     throughput = round(records_processed / (duration_ms / 1_000), 2) if duration_ms else 0.0
-    precision = _percentage(autonomous_links - false_positives, autonomous_links)
-    match_rate = _percentage(correctly_resolved, matchable_cases)
-    autonomous_resolution_rate = _percentage(len(autonomous_cases), len(truth_cases))
-
-    stage_counts: dict[str, dict[str, int]] = defaultdict(
-        lambda: defaultdict(int)
+    precision_value = _percentage(
+        max(0, autonomous_links - false_positive_total), autonomous_links
     )
-    for prediction in prediction_values:
-        stage = prediction.stage or "unknown"
-        stage_counts[stage]["records_processed"] += 1
-        stage_counts[stage]["autonomous_cases"] += int(prediction.autonomous)
-        if prediction.autonomous:
-            case = truth_by_id.get(prediction.case_id or "")
-            expected_ids = set(case.source_ids) if case is not None else set()
-            stage_counts[stage]["false_positives"] += len(
-                set(prediction.selected_ids).difference(expected_ids)
-            ) or int(not prediction.selected_ids)
-    stage_metrics = {
-        stage: {
-            **counts,
-            "precision": _percentage(
-                counts["autonomous_cases"] - counts["false_positives"],
-                counts["autonomous_cases"],
-            ),
-        }
-        for stage, counts in sorted(stage_counts.items())
-    }
+    match_rate_value = _percentage(correctly_resolved_value, matchable_cases_value)
+    end_to_end_autonomy_rate_value = _percentage(
+        len(autonomously_resolved_cases), matchable_cases_value
+    )
+    exception_cases_value = sum(not case.matchable for case in truth_cases)
+    exception_recall_value = _percentage(
+        len(recalled_exception_cases), exception_cases_value
+    )
 
-    per_class: dict[str, ClassMetrics] = {}
-    for scenario_class, counts in sorted(per_class_counts.items()):
-        class_autonomous_links = sum(
-            1
-            for prediction in prediction_values
-            if prediction.case_id in truth_by_id
-            and truth_by_id[prediction.case_id].scenario_class == scenario_class
-            and prediction.autonomous
-        )
-        class_false_positives = sum(
-            len(
-                set(prediction.selected_ids).difference(
-                    set(truth_by_id[prediction.case_id].source_ids)
+    stage_metrics: dict[str, StageMetrics] | None = None
+    if benchmark_available:
+        stage_metrics = {}
+        positive_cases = [case for case in truth_cases if case.matchable]
+        for stage in _REQUIRED_STAGE_ORDER:
+            stage_predictions = [
+                prediction
+                for prediction in prediction_values
+                if prediction.stage == stage
+            ]
+            stage_case_predictions: dict[str, list[Prediction]] = defaultdict(list)
+            for prediction in stage_predictions:
+                if prediction.case_id in truth_by_id:
+                    stage_case_predictions[prediction.case_id].append(prediction)
+            stage_correctly_resolved = sum(
+                _stage_case_is_correct(
+                    case,
+                    stage_case_predictions.get(case.case_id, []),
+                    stage,
                 )
+                for case in positive_cases
             )
-            for prediction in prediction_values
-            if prediction.autonomous
-            and prediction.case_id in truth_by_id
-            and truth_by_id[prediction.case_id].scenario_class == scenario_class
-        )
-        per_class[scenario_class] = ClassMetrics(
-            scenario_class=scenario_class,
-            cases=counts["cases"],
-            matchable_cases=counts["matchable_cases"],
-            correctly_resolved=counts["correctly_resolved"],
-            match_rate=_percentage(
-                counts["correctly_resolved"], counts["matchable_cases"]
-            ),
-            autonomous_cases=counts["autonomous_cases"],
-            false_positives=class_false_positives,
-            precision=_percentage(
-                class_autonomous_links - class_false_positives, class_autonomous_links
-            ),
-            open_exceptions=counts["open_exceptions"],
-            financially_unresolved_cases=counts["financially_unresolved_cases"],
-            money_reconciled=counts["money_reconciled"],
-            money_unresolved=counts["money_unresolved"],
-        )
+            stage_autonomous_cases = sum(
+                _stage_case_is_autonomous(
+                    case,
+                    stage_case_predictions.get(case.case_id, []),
+                    stage,
+                )
+                for case in positive_cases
+            )
+            stage_false_positives = sum(
+                _autonomous_stage_false_positive_count(
+                    truth_by_id.get(prediction.case_id or ""), prediction, stage
+                )
+                for prediction in stage_predictions
+                if prediction.autonomous
+            )
+            stage_autonomous_links = sum(
+                len(prediction.selected_ids)
+                for prediction in stage_predictions
+                if prediction.autonomous
+            )
+            stage_metrics[stage] = StageMetrics(
+                eligible_cases=len(positive_cases),
+                correctly_resolved=stage_correctly_resolved,
+                correctness_rate=_percentage(
+                    stage_correctly_resolved, len(positive_cases)
+                ),
+                autonomous_cases=stage_autonomous_cases,
+                autonomy_rate=_percentage(stage_autonomous_cases, len(positive_cases)),
+                autonomous_links=stage_autonomous_links,
+                false_positives=stage_false_positives,
+                precision=_percentage(
+                    max(0, stage_autonomous_links - stage_false_positives),
+                    stage_autonomous_links,
+                ),
+                unresolved_cases=len(positive_cases) - stage_correctly_resolved,
+                open_exceptions=sum(
+                    int(
+                        not prediction.autonomous
+                        and prediction.review_status not in {"approved", "rejected"}
+                    )
+                    for prediction in stage_predictions
+                ),
+                records_processed=len(stage_predictions),
+            )
+
+    per_class_value: dict[str, ClassMetrics] | None = None
+    if benchmark_available:
+        per_class_value = {}
+        for scenario_class, counts in sorted(per_class_counts.items()):
+            class_autonomous_links = sum(
+                len(prediction.selected_ids)
+                for prediction in prediction_values
+                if prediction.autonomous
+                and prediction.case_id in truth_by_id
+                and truth_by_id[prediction.case_id].scenario_class == scenario_class
+            )
+            class_false_positives = sum(
+                _autonomous_false_positive_count(
+                    truth_by_id.get(prediction.case_id or ""), prediction
+                )
+                for prediction in prediction_values
+                if prediction.autonomous
+                and prediction.case_id in truth_by_id
+                and truth_by_id[prediction.case_id].scenario_class == scenario_class
+            )
+            per_class_value[scenario_class] = ClassMetrics(
+                scenario_class=scenario_class,
+                cases=counts["cases"],
+                matchable_cases=counts["matchable_cases"],
+                correctly_resolved=counts["correctly_resolved"],
+                match_rate=_percentage(
+                    counts["correctly_resolved"], counts["matchable_cases"]
+                ),
+                autonomous_cases=counts["autonomous_cases"],
+                false_positives=class_false_positives,
+                precision=_percentage(
+                    max(0, class_autonomous_links - class_false_positives),
+                    class_autonomous_links,
+                ),
+                open_exceptions=counts["open_exceptions"],
+                financially_unresolved_cases=counts["financially_unresolved_cases"],
+                money_reconciled=counts["money_reconciled"],
+                money_unresolved=counts["money_unresolved"],
+            )
 
     approved_cases = sum(status == "approved" for status in reviewed_cases.values())
     rejected_cases = sum(status == "rejected" for status in reviewed_cases.values())
-    review_adjusted_resolved = len(
-        financially_resolved_cases
-        | {case_id for case_id, status in reviewed_cases.items() if status == "approved"}
-    )
-    review_adjusted_match_rate = _percentage(
-        sum(
-            case.case_id in financially_resolved_cases
-            or reviewed_cases.get(case.case_id) == "approved"
-            for case in truth_cases
-            if case.matchable
-        ),
-        matchable_cases,
+    approved_case_ids = {
+        case_id for case_id, status in reviewed_cases.items() if status == "approved"
+    }
+    review_adjusted_resolved = len(financially_resolved_cases | approved_case_ids)
+    review_adjusted_match_rate = (
+        _percentage(
+            sum(
+                case.case_id in financially_resolved_cases
+                or reviewed_cases.get(case.case_id) == "approved"
+                for case in truth_cases
+                if case.matchable
+            ),
+            matchable_cases_value,
+        )
+        if benchmark_available
+        else None
     )
     review_adjusted = {
         "closedCases": review_adjusted_resolved
@@ -430,40 +670,63 @@ def evaluate_predictions(
         "rejectedCases": rejected_cases,
         "resolvedCases": review_adjusted_resolved,
         "matchRate": review_adjusted_match_rate,
-        "moneyReconciled": money_reconciled,
+        "moneyReconciled": money_reconciled_value if benchmark_available else None,
     }
+    false_positives_value = false_positive_total if benchmark_available else None
+    precision = precision_value if benchmark_available else None
+    match_rate = match_rate_value if benchmark_available else None
+    end_to_end_autonomy_rate = (
+        end_to_end_autonomy_rate_value if benchmark_available else None
+    )
+    exception_recall = exception_recall_value if benchmark_available else None
+    stage_a = stage_metrics.get("ledger_to_razorpay") if stage_metrics else None
+    stage_b = stage_metrics.get("razorpay_to_settlement") if stage_metrics else None
     acceptance_checks = _acceptance_checks(
         benchmark_available=benchmark_available,
         precision=precision,
-        false_positives=false_positives,
+        false_positives=false_positives_value,
         match_rate=match_rate,
-        autonomous_resolution_rate=autonomous_resolution_rate,
+        end_to_end_autonomy_rate=end_to_end_autonomy_rate,
+        stage_a=stage_a,
+        stage_b=stage_b,
+        per_class=per_class_value,
+        exception_recall=exception_recall,
         duration_ms=duration_ms,
-        per_class=per_class,
     )
     return EvaluationReport(
         benchmark_available=benchmark_available,
         precision=precision,
-        false_positives=false_positives,
-        false_positive_rate=_percentage(false_positives, autonomous_links),
-        match_rate=match_rate,
-        autonomous_resolution_rate=autonomous_resolution_rate,
-        correctly_resolved=correctly_resolved,
-        matchable_cases=matchable_cases,
-        autonomous_cases=len(autonomous_cases),
-        open_exceptions=open_exceptions,
-        financially_unresolved_cases=sum(
-            case.case_id not in financially_resolved_cases
-            for case in truth_cases
-            if case.matchable
+        false_positives=false_positives_value,
+        false_positive_rate=(
+            _percentage(false_positive_total, autonomous_links)
+            if benchmark_available
+            else None
         ),
-        money_reconciled=money_reconciled,
-        money_unresolved=money_unresolved,
+        match_rate=match_rate,
+        end_to_end_autonomy_rate=end_to_end_autonomy_rate,
+        exception_recall=exception_recall,
+        correctly_resolved=(correctly_resolved_value if benchmark_available else None),
+        matchable_cases=(matchable_cases_value if benchmark_available else None),
+        autonomous_cases=(
+            len(autonomously_resolved_cases) if benchmark_available else None
+        ),
+        open_exceptions=open_exceptions,
+        financially_unresolved_cases=(
+            sum(
+                case.case_id not in financially_resolved_cases
+                for case in truth_cases
+                if case.matchable
+            )
+            if benchmark_available
+            else None
+        ),
+        money_reconciled=(money_reconciled_value if benchmark_available else None),
+        money_unresolved=(money_unresolved_value if benchmark_available else None),
         settlement_net=settlement_net,
         records_processed=records_processed,
         duration_ms=duration_ms,
         throughput=throughput,
-        per_class=per_class,
+        per_class=per_class_value,
         stage_metrics=stage_metrics,
         review_adjusted=review_adjusted,
         acceptance_checks=acceptance_checks,
@@ -474,9 +737,13 @@ def evaluate_predictions(
 def report_to_dict(report: EvaluationReport) -> dict[str, Any]:
     """Convert the report to JSON-safe storage data without truth rows."""
     data = asdict(report)
-    data["per_class"] = {
-        key: asdict(value) for key, value in report.per_class.items()
-    }
+    data["per_class"] = (
+        {
+            key: asdict(value) for key, value in report.per_class.items()
+        }
+        if report.per_class is not None
+        else None
+    )
     data["benchmarkAvailable"] = report.benchmark_available
     data["benchmarkUnavailable"] = report.benchmark_unavailable
     data["sourceThroughput"] = report.source_throughput
@@ -548,10 +815,13 @@ async def evaluate_run(
                 )
             )
         ).scalars().all()
-        truth_ids_by_case: dict[UUID, list[str]] = defaultdict(list)
+        truth_sources_by_case: dict[UUID, list[TruthSource]] = defaultdict(list)
         for truth_link in truth_link_rows:
-            truth_ids_by_case[truth_link.evaluation_case_id].append(
-                _source_id(truth_link.source_id)
+            truth_sources_by_case[truth_link.evaluation_case_id].append(
+                TruthSource(
+                    source_type=truth_link.source_type,
+                    source_id=_source_id(truth_link.source_id),
+                )
             )
         truth = [
             TruthCase(
@@ -560,7 +830,7 @@ async def evaluate_run(
                 amount=case.amount,
                 matchable=case.matchable,
                 expected_status=_string(case.expected_status),
-                source_ids=tuple(truth_ids_by_case.get(case.id, [])),
+                sources=tuple(truth_sources_by_case.get(case.id, [])),
             )
             for case in case_rows
         ]
@@ -625,7 +895,7 @@ async def evaluate_run(
         )
 
     review_by_result = {
-        exception.result_id: exception.status.value
+        exception.result_id: _string(exception.status)
         for exception in exception_rows
         if exception.result_id is not None
         and _string(exception.status)

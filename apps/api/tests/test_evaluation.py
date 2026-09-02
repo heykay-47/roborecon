@@ -1,24 +1,54 @@
-from app.evaluation.model import Prediction, TruthCase
-from app.evaluation.service import evaluate_predictions
+from types import SimpleNamespace
+from unittest.mock import AsyncMock, MagicMock
+from uuid import uuid4
+
+import pytest
+
+from app.batch.model import Batch
+from app.common.enums import (
+    BatchKind,
+    BatchStatus,
+    ReconciliationStage,
+    ResultStatus,
+    RunStatus,
+)
+from app.evaluation.model import Prediction, TruthCase, TruthSource
+from app.evaluation.service import evaluate_predictions, evaluate_run
+from app.reconciliation.model import MatchLink, ReconciliationResult, ReconciliationRun
+from benchmark import fixed_predictions, fixed_truth
+
+
+def source(source_type: str, source_id: str) -> TruthSource:
+    return TruthSource(source_type=source_type, source_id=source_id)
+
+
+def matched_truth(case_id: str = "case-1", scenario_class: str = "standard") -> TruthCase:
+    return TruthCase(
+        case_id=case_id,
+        scenario_class=scenario_class,
+        amount=10_000,
+        matchable=True,
+        expected_status="matched",
+        sources=(
+            source("ledger", f"ledger-{case_id}"),
+            source("razorpay_order", f"order-{case_id}"),
+            source("razorpay_payment", f"payment-{case_id}"),
+            source("settlement", f"settlement-{case_id}"),
+            source("bank_credit", f"bank-{case_id}"),
+        ),
+    )
 
 
 def _truth() -> list[TruthCase]:
     return [
-        TruthCase(
-            case_id="case-1",
-            scenario_class="exact_id",
-            amount=10_000,
-            matchable=True,
-            expected_status="matched",
-            source_ids=("ledger-1", "payment-1"),
-        ),
+        matched_truth("case-1", "exact_id"),
         TruthCase(
             case_id="case-2",
             scenario_class="ambiguous",
             amount=2_000,
-            matchable=True,
+            matchable=False,
             expected_status="ambiguous",
-            source_ids=("ledger-2",),
+            sources=(source("ledger", "ledger-2"),),
         ),
     ]
 
@@ -28,10 +58,11 @@ def test_false_positive_blocks_acceptance():
         Prediction(
             case_id="case-1",
             status="matched",
-            selected_ids=("ledger-1", "wrong-payment"),
+            selected_ids=("ledger-case-1", "wrong-payment"),
             autonomous=True,
             amount=10_000,
             settlement_net=9_500,
+            stage="ledger_to_razorpay",
         ),
         Prediction(
             case_id="case-2",
@@ -54,10 +85,20 @@ def test_metrics_include_classes_review_closure_money_and_throughput():
         Prediction(
             case_id="case-1",
             status="matched",
-            selected_ids=("ledger-1", "payment-1"),
+            selected_ids=("ledger-case-1", "order-case-1", "payment-case-1"),
             autonomous=True,
             amount=10_000,
             settlement_net=9_500,
+            stage="ledger_to_razorpay",
+        ),
+        Prediction(
+            case_id="case-1",
+            status="matched",
+            selected_ids=("payment-case-1", "settlement-case-1", "bank-case-1"),
+            autonomous=True,
+            amount=10_000,
+            settlement_net=9_500,
+            stage="razorpay_to_settlement",
         ),
         Prediction(
             case_id="case-2",
@@ -73,16 +114,568 @@ def test_metrics_include_classes_review_closure_money_and_throughput():
 
     assert set(report.per_class) == {"exact_id", "ambiguous"}
     assert report.match_rate == 100
-    assert report.autonomous_resolution_rate == 50
-    assert report.money_reconciled == 12_000
-    assert report.money_unresolved == 0
+    assert report.end_to_end_autonomy_rate == 100
+    assert report.money_reconciled == 10_000
+    assert report.money_unresolved == 2_000
+    assert report.financially_unresolved_cases == 0
     assert report.settlement_net == 9_500
     assert report.throughput == 200.0
     assert report.review_adjusted["closedCases"] == 2
 
 
 def test_unscored_batch_reports_benchmark_unavailable():
-    report = evaluate_predictions([], [], duration_ms=100, benchmark_available=False)
+    report = evaluate_predictions(
+        [],
+        [
+            Prediction(
+                case_id=None,
+                status="matched",
+                selected_ids=("settlement-1",),
+                autonomous=True,
+                settlement_net=9_500,
+            ),
+            Prediction(
+                case_id=None,
+                status="ambiguous",
+                autonomous=False,
+            ),
+        ],
+        duration_ms=100,
+        source_count=20,
+        benchmark_available=False,
+        open_exception_count=1,
+    )
 
     assert report.benchmark_available is False
+    assert report.precision is None
+    assert report.false_positives is None
+    assert report.match_rate is None
+    assert report.end_to_end_autonomy_rate is None
+    assert report.exception_recall is None
+    assert report.per_class is None
+    assert report.stage_metrics is None
+    assert report.records_processed == 20
+    assert report.duration_ms == 100
+    assert report.throughput == 200.0
+    assert report.open_exceptions == 1
+    assert report.settlement_net == 9_500
     assert report.acceptance_passed is False
+
+
+def test_matched_case_requires_both_stages_and_complete_source_coverage():
+    truth = [
+        TruthCase(
+            case_id="case-1",
+            scenario_class="standard",
+            amount=10_000,
+            matchable=True,
+            expected_status="matched",
+            sources=(
+                source("ledger", "ledger-1"),
+                source("razorpay_payment", "payment-1"),
+                source("settlement", "settlement-1"),
+                source("bank_credit", "bank-1"),
+            ),
+        )
+    ]
+
+    partial_report = evaluate_predictions(
+        truth,
+        [
+            Prediction(
+                case_id="case-1",
+                status="matched",
+                selected_ids=("ledger-1", "payment-1"),
+                autonomous=True,
+                stage="ledger_to_razorpay",
+            ),
+            Prediction(
+                case_id="case-1",
+                status="missing_settlement",
+                selected_ids=("payment-1",),
+                stage="razorpay_to_settlement",
+            ),
+        ],
+        duration_ms=100,
+    )
+
+    assert partial_report.match_rate == 0
+    assert partial_report.autonomous_cases == 0
+    assert partial_report.financially_unresolved_cases == 1
+    assert partial_report.stage_metrics["ledger_to_razorpay"].correctness_rate == 100
+    assert partial_report.stage_metrics["razorpay_to_settlement"].correctness_rate == 0
+    assert partial_report.stage_metrics["razorpay_to_settlement"].unresolved_cases == 1
+
+    complete_report = evaluate_predictions(
+        truth,
+        [
+            Prediction(
+                case_id="case-1",
+                status="matched",
+                selected_ids=("ledger-1", "payment-1"),
+                autonomous=True,
+                stage="ledger_to_razorpay",
+            ),
+            Prediction(
+                case_id="case-1",
+                status="matched",
+                selected_ids=("payment-1", "settlement-1", "bank-1"),
+                autonomous=True,
+                stage="razorpay_to_settlement",
+            ),
+        ],
+        duration_ms=100,
+    )
+
+    assert complete_report.match_rate == 100
+    assert complete_report.autonomous_cases == 1
+    assert complete_report.financially_unresolved_cases == 0
+
+
+def test_matched_case_with_missing_stage_metadata_is_not_complete():
+    truth = [
+        TruthCase(
+            case_id="case-1",
+            scenario_class="standard",
+            amount=10_000,
+            matchable=True,
+            expected_status="matched",
+            sources=(
+                source("ledger", "ledger-1"),
+                source("razorpay_payment", "payment-1"),
+                source("settlement", "settlement-1"),
+                source("bank_credit", "bank-1"),
+            ),
+        )
+    ]
+
+    report = evaluate_predictions(
+        truth,
+        [
+            Prediction(
+                case_id="case-1",
+                status="matched",
+                selected_ids=("ledger-1", "payment-1", "settlement-1", "bank-1"),
+                autonomous=True,
+            )
+        ],
+        duration_ms=100,
+    )
+
+    assert report.match_rate == 0
+    assert report.autonomous_cases == 0
+    assert report.financially_unresolved_cases == 1
+    assert report.money_reconciled == 0
+    assert report.money_unresolved == 10_000
+
+
+def test_matched_case_with_unknown_stage_metadata_is_not_complete():
+    truth = [
+        TruthCase(
+            case_id="case-1",
+            scenario_class="standard",
+            amount=10_000,
+            matchable=True,
+            expected_status="matched",
+            sources=(
+                source("ledger", "ledger-1"),
+                source("razorpay_payment", "payment-1"),
+                source("settlement", "settlement-1"),
+                source("bank_credit", "bank-1"),
+            ),
+        )
+    ]
+
+    report = evaluate_predictions(
+        truth,
+        [
+            Prediction(
+                case_id="case-1",
+                status="matched",
+                selected_ids=("ledger-1", "payment-1", "settlement-1", "bank-1"),
+                autonomous=True,
+                stage="unknown",
+            )
+        ],
+        duration_ms=100,
+    )
+
+    assert report.match_rate == 0
+    assert report.autonomous_cases == 0
+    assert report.financially_unresolved_cases == 1
+
+
+def test_matched_case_with_one_non_autonomous_stage_is_not_autonomous():
+    truth = [
+        TruthCase(
+            case_id="case-1",
+            scenario_class="standard",
+            amount=10_000,
+            matchable=True,
+            expected_status="matched",
+            sources=(
+                source("ledger", "ledger-1"),
+                source("razorpay_payment", "payment-1"),
+                source("settlement", "settlement-1"),
+                source("bank_credit", "bank-1"),
+            ),
+        )
+    ]
+
+    report = evaluate_predictions(
+        truth,
+        [
+            Prediction(
+                case_id="case-1",
+                status="matched",
+                selected_ids=("ledger-1", "payment-1"),
+                autonomous=True,
+                stage="ledger_to_razorpay",
+            ),
+            Prediction(
+                case_id="case-1",
+                status="matched",
+                selected_ids=("payment-1", "settlement-1", "bank-1"),
+                autonomous=False,
+                stage="razorpay_to_settlement",
+            ),
+        ],
+        duration_ms=100,
+    )
+
+    assert report.match_rate == 100
+    assert report.autonomous_cases == 0
+    assert report.financially_unresolved_cases == 1
+    assert report.money_reconciled == 0
+    assert report.money_unresolved == 10_000
+
+
+@pytest.mark.parametrize("extra_stage", [None, "unknown"])
+def test_matched_case_with_extra_unknown_or_missing_stage_is_not_resolved(extra_stage):
+    truth = [
+        TruthCase(
+            case_id="case-1",
+            scenario_class="standard",
+            amount=10_000,
+            matchable=True,
+            expected_status="matched",
+            sources=(
+                source("ledger", "ledger-1"),
+                source("razorpay_payment", "payment-1"),
+                source("settlement", "settlement-1"),
+                source("bank_credit", "bank-1"),
+            ),
+        )
+    ]
+
+    report = evaluate_predictions(
+        truth,
+        [
+            Prediction(
+                case_id="case-1",
+                status="matched",
+                selected_ids=("ledger-1", "payment-1"),
+                autonomous=True,
+                stage="ledger_to_razorpay",
+            ),
+            Prediction(
+                case_id="case-1",
+                status="matched",
+                selected_ids=("payment-1", "settlement-1", "bank-1"),
+                autonomous=True,
+                stage="razorpay_to_settlement",
+            ),
+            Prediction(
+                case_id="case-1",
+                status="matched",
+                autonomous=True,
+                stage=extra_stage,
+            ),
+        ],
+        duration_ms=100,
+    )
+
+    assert report.correctly_resolved == 0
+    assert report.match_rate == 0
+    assert report.autonomous_cases == 0
+    assert report.financially_unresolved_cases == 1
+    assert report.money_reconciled == 0
+    assert report.money_unresolved == 10_000
+
+
+def test_exception_case_is_correct_but_never_financially_or_autonomously_resolved():
+    truth = [
+        TruthCase(
+            case_id="case-1",
+            scenario_class="amount_mismatch",
+            amount=10_000,
+            matchable=False,
+            expected_status="amount_mismatch",
+            sources=(source("ledger", "ledger-1"),),
+        )
+    ]
+
+    report = evaluate_predictions(
+        truth,
+        [
+            Prediction(
+                case_id="case-1",
+                status="amount_mismatch",
+                selected_ids=("ledger-1",),
+                autonomous=True,
+            )
+        ],
+        duration_ms=100,
+    )
+
+    assert report.correctly_resolved == 0
+    assert report.precision == 100
+    assert report.autonomous_cases == 0
+    assert report.exception_recall == 0
+    assert report.financially_unresolved_cases == 0
+    assert report.money_reconciled == 0
+    assert report.money_unresolved == 10_000
+
+
+def test_precision_uses_autonomous_selected_link_count_for_class_and_stage_metrics():
+    truth = [
+        TruthCase(
+            case_id="case-1",
+            scenario_class="standard",
+            amount=10_000,
+            matchable=True,
+            expected_status="matched",
+            sources=(
+                source("ledger", "ledger-1"),
+                source("razorpay_payment", "payment-1"),
+            ),
+        )
+    ]
+
+    report = evaluate_predictions(
+        truth,
+        [
+            Prediction(
+                case_id="case-1",
+                status="matched",
+                selected_ids=("ledger-1", "payment-1", "wrong-1"),
+                autonomous=True,
+                stage="ledger_to_razorpay",
+            )
+        ],
+        duration_ms=100,
+    )
+
+    assert report.precision == 66.67
+    assert report.false_positives == 1
+    assert report.per_class["standard"].precision == 66.67
+    assert report.per_class["standard"].false_positives == 1
+    assert report.stage_metrics["ledger_to_razorpay"].autonomous_links == 3
+    assert report.stage_metrics["ledger_to_razorpay"].precision == 66.67
+    assert report.stage_metrics["ledger_to_razorpay"].open_exceptions == 0
+
+
+def test_strict_stage_and_end_to_end_metrics_are_separate():
+    case = matched_truth()
+    report = evaluate_predictions(
+        [case],
+        [
+            Prediction(
+                case_id=case.case_id,
+                status="matched",
+                selected_ids=("ledger-case-1", "order-case-1", "payment-case-1"),
+                autonomous=True,
+                stage="ledger_to_razorpay",
+            ),
+            Prediction(
+                case_id=case.case_id,
+                status="matched",
+                selected_ids=("payment-case-1", "settlement-case-1", "bank-case-1"),
+                autonomous=False,
+                stage="razorpay_to_settlement",
+            ),
+        ],
+        duration_ms=100,
+    )
+
+    assert report.stage_metrics["ledger_to_razorpay"].autonomy_rate == 100
+    assert report.stage_metrics["razorpay_to_settlement"].autonomy_rate == 0
+    assert report.match_rate == 100
+    assert report.end_to_end_autonomy_rate == 0
+
+
+def test_exception_recall_requires_expected_non_autonomous_status():
+    case = TruthCase(
+        case_id="exception-1",
+        scenario_class="missing_settlement",
+        amount=10_000,
+        matchable=False,
+        expected_status="missing_settlement",
+        sources=(
+            source("ledger", "ledger-1"),
+            source("razorpay_payment", "payment-1"),
+        ),
+    )
+    expected = Prediction(
+        case_id=case.case_id,
+        status="missing_settlement",
+        selected_ids=("payment-1",),
+        autonomous=False,
+        stage="razorpay_to_settlement",
+    )
+
+    assert evaluate_predictions([case], [expected], duration_ms=100).exception_recall == 100
+    assert evaluate_predictions([case], [], duration_ms=100).exception_recall == 0
+
+
+def test_fixed_benchmark_passes_every_strict_gate():
+    from app.demo.dataset import build_demo_dataset
+
+    dataset = build_demo_dataset()
+    report = evaluate_predictions(
+        fixed_truth(dataset),
+        fixed_predictions(dataset),
+        duration_ms=100,
+        source_count=dataset.source_row_count,
+    )
+
+    assert report.precision == 100
+    assert report.false_positives == 0
+    assert report.match_rate >= 95
+    assert report.end_to_end_autonomy_rate >= 90
+    assert report.stage_metrics["ledger_to_razorpay"].autonomy_rate >= 90
+    assert report.stage_metrics["razorpay_to_settlement"].autonomy_rate >= 90
+    assert report.exception_recall == 100
+    assert all(report.acceptance_checks.values())
+    assert report.acceptance_passed is True
+
+
+@pytest.mark.asyncio
+async def test_evaluate_run_uses_persisted_results_and_hidden_truth_after_completion():
+    batch_id = uuid4()
+    run_id = uuid4()
+    case_id = uuid4()
+    ledger_id = uuid4()
+    payment_id = uuid4()
+    settlement_id = uuid4()
+    run = ReconciliationRun(
+        id=run_id,
+        batch_id=batch_id,
+        status=RunStatus.completed,
+        started_at=SimpleNamespace(),
+        duration_ms=100,
+        source_row_count=4,
+    )
+    batch = Batch(
+        id=batch_id,
+        kind=BatchKind.demo,
+        status=BatchStatus.completed,
+        ground_truth_available=True,
+    )
+    first_result = ReconciliationResult(
+        id=uuid4(),
+        run_id=run_id,
+        batch_id=batch_id,
+        stage=ReconciliationStage.ledger_to_razorpay,
+        status=ResultStatus.matched,
+        primary_source_type="ledger",
+        primary_source_id=ledger_id,
+        amount=10_000,
+        currency="INR",
+        autonomous=True,
+        selected_ids=[str(payment_id)],
+    )
+    second_result = ReconciliationResult(
+        id=uuid4(),
+        run_id=run_id,
+        batch_id=batch_id,
+        stage=ReconciliationStage.razorpay_to_settlement,
+        status=ResultStatus.matched,
+        primary_source_type="razorpay_payment",
+        primary_source_id=payment_id,
+        amount=10_000,
+        currency="INR",
+        autonomous=True,
+        selected_ids=[str(settlement_id)],
+    )
+    links = [
+        MatchLink(
+            id=uuid4(),
+            run_id=run_id,
+            result_id=first_result.id,
+            source_type="ledger",
+            source_id=ledger_id,
+            role="primary",
+            autonomous=True,
+            actor="system",
+        ),
+        MatchLink(
+            id=uuid4(),
+            run_id=run_id,
+            result_id=first_result.id,
+            source_type="razorpay_payment",
+            source_id=payment_id,
+            role="selected",
+            autonomous=True,
+            actor="system",
+        ),
+        MatchLink(
+            id=uuid4(),
+            run_id=run_id,
+            result_id=second_result.id,
+            source_type="razorpay_payment",
+            source_id=payment_id,
+            role="primary",
+            autonomous=True,
+            actor="system",
+        ),
+        MatchLink(
+            id=uuid4(),
+            run_id=run_id,
+            result_id=second_result.id,
+            source_type="settlement",
+            source_id=settlement_id,
+            role="selected",
+            autonomous=True,
+            actor="system",
+        ),
+    ]
+    case = SimpleNamespace(
+        id=case_id,
+        scenario_class="standard",
+        amount=10_000,
+        matchable=True,
+        expected_status=ResultStatus.matched,
+    )
+    truth_links = [
+        SimpleNamespace(source_type="ledger", source_id=ledger_id),
+        SimpleNamespace(source_type="razorpay_payment", source_id=payment_id),
+        SimpleNamespace(source_type="settlement", source_id=settlement_id),
+    ]
+
+    def rows(values):
+        result = MagicMock()
+        result.scalars.return_value.all.return_value = values
+        return result
+
+    session = AsyncMock()
+    session.get = AsyncMock(side_effect=[run, batch])
+    session.execute = AsyncMock(
+        side_effect=[
+            rows([first_result, second_result]),
+            rows(links),
+            rows([]),
+            rows([SimpleNamespace(id=settlement_id, amount=9_500)]),
+            rows([case]),
+            rows(truth_links),
+        ]
+    )
+    session.commit = AsyncMock()
+
+    report = await evaluate_run(session, run_id)
+
+    assert report.match_rate == 100
+    assert report.end_to_end_autonomy_rate == 100
+    assert report.settlement_net == 9_500
+    assert run.metrics is not None
+    session.commit.assert_awaited_once()

@@ -252,18 +252,20 @@ def build_demo_dataset(seed: str = DEFAULT_SEED) -> DemoDataset:
     for index in range(120):
         case_key = f"case-{index:03d}"
         tags = _scenario_tags(index)
+        expected_status = _expected_status(tags)
+        positive_matchable = expected_status is ResultStatus.matched
         amount = _amount(index)
         ledger_id = _seeded_stable_id(seed, "ledger-entry", case_key)
         order_id = _seeded_stable_id(seed, "razorpay-order", case_key)
         provider_order_id = _seeded_provider_id(
             seed, "order", "razorpay-order", case_key
         )
-        if "exact_id" in tags:
+        if "fuzzy_reference" in tags:
+            reference = f"INVOICE/{index:04d}/ONLINE"
+            receipt = f"invoice-{index:04d}"
+        elif positive_matchable:
             reference = f"RCPT-{index:04d}"
             receipt = reference
-        elif "fuzzy_reference" in tags:
-            reference = f"INV/{index:04d}/ONLINE"
-            receipt = f"invoice-{index:04d}"
         else:
             reference = f"INV-{index:04d}"
             receipt = f"checkout-{index:04d}"
@@ -284,7 +286,7 @@ def build_demo_dataset(seed: str = DEFAULT_SEED) -> DemoDataset:
             receipt=receipt,
             amount=amount,
             currency="INR",
-            status="paid" if index % 9 else "created",
+            status="paid" if positive_matchable else ("paid" if index % 9 else "created"),
             business_at=_business_time(index, offset_days=1 if "date_shift" in tags else 0),
         )
         razorpay_orders.append(order)
@@ -355,8 +357,8 @@ def build_demo_dataset(seed: str = DEFAULT_SEED) -> DemoDataset:
                 scenario_class=_scenario_class(tags),
                 scenario_tags=tags,
                 amount=amount,
-                matchable="missing_razorpay" not in tags,
-                expected_status=_expected_status(tags),
+                matchable=positive_matchable,
+                expected_status=expected_status,
                 ledger_entry_id=ledger_id,
                 razorpay_order_id=order.id,
                 razorpay_payment_id=(payment_by_case[index].id if index in payment_by_case else None),

@@ -17,6 +17,7 @@ from app.demo.dataset import (
     RazorpayRefundSeed,
     SettlementLineSeed,
     SettlementSeed,
+    build_demo_dataset,
 )
 from app.reconciliation.engine import (
     _amount_window,
@@ -283,6 +284,53 @@ def test_stage_a_exact_chain_evidence_identifies_matching_provider_identifier():
         reference_evidence.observed_values["normalized_matched_provider_identifier"]
         == "PAYEXACT"
     )
+
+
+def test_stage_a_fuzzy_reference_uses_verified_order_payment_chain():
+    outcome = reconcile_stage_a(
+        [ledger(reference="INVOICE/0001/ONLINE")],
+        [order(receipt="invoice-0001")],
+        [payment(receipt="invoice-0001")],
+        [],
+    )[0]
+
+    selected = outcome.candidates[0]
+    chain = next(
+        item for item in outcome.evidence if item.rule_code == "ORDER_PAYMENT_CHAIN"
+    )
+    assert selected.exact_identifier_chain is False
+    assert chain.result == "pass"
+    assert chain.points == 20
+    assert outcome.score >= 90
+    assert outcome.autonomous is True
+
+
+def test_stage_a_broken_order_payment_chain_adds_no_authority():
+    outcome = reconcile_stage_a(
+        [ledger(reference="INVOICE/0001/ONLINE")],
+        [order(receipt="invoice-0001", amount=9_000)],
+        [payment(receipt="invoice-0001", amount=10_000)],
+        [],
+    )[0]
+
+    chain = next(
+        item for item in outcome.evidence if item.rule_code == "ORDER_PAYMENT_CHAIN"
+    )
+    assert chain.result == "fail"
+    assert chain.points == 0
+    assert outcome.autonomous is False
+
+
+def test_valid_order_payment_chains_do_not_bypass_duplicate_veto():
+    outcome = reconcile_stage_a(
+        [ledger(reference="RCPT-001")],
+        [order()],
+        [payment("one"), payment("two", provider_order_id="order_001")],
+        [],
+    )[0]
+
+    assert outcome.status is ResultStatus.duplicate
+    assert outcome.autonomous is False
 
 
 def test_stage_a_does_not_reuse_provider_payment_across_ledger_entries():
@@ -554,7 +602,7 @@ def test_stage_b_verifies_fee_gst_arithmetic_and_bank_credit():
     assert any(item.rule_code == "BANK_UTR" for item in outcomes[0].evidence)
 
 
-def test_stage_b_does_not_reuse_settlement_or_bank_credit_across_payments():
+def test_stage_b_allows_multiple_payment_lines_in_one_shared_aggregate():
     first_payment = payment("first", amount=6_000)
     second_payment = payment("second", amount=4_000)
     current_settlement = settlement()
@@ -587,12 +635,12 @@ def test_stage_b_does_not_reuse_settlement_or_bank_credit_across_payments():
 
     assert outcomes[0].status is ResultStatus.matched
     assert outcomes[0].autonomous is True
-    assert outcomes[1].status is ResultStatus.duplicate
-    assert outcomes[1].autonomous is False
-    assert any(item.rule_code == "BATCH_COLLISION" for item in outcomes[1].evidence)
+    assert outcomes[1].status is ResultStatus.matched
+    assert outcomes[1].autonomous is True
+    assert outcomes[0].selected_ids == outcomes[1].selected_ids
 
 
-def test_stage_b_collision_does_not_suppress_unused_alternative():
+def test_stage_b_prefers_shared_aggregate_when_payment_lines_are_distinct():
     first_payment = payment("first", provider_payment_id="pay_first", amount=6_000)
     second_payment = payment("second", provider_payment_id="pay_second", amount=4_000)
     shared = settlement("shared", amount=9_764, utr="UTR-shared")
@@ -636,9 +684,67 @@ def test_stage_b_collision_does_not_suppress_unused_alternative():
     assert outcomes[0].selected_ids == [str(shared.id), str(ident("credit-shared"))]
     assert outcomes[0].autonomous is True
     assert outcomes[1].status is ResultStatus.matched
-    assert str(alternative.id) in outcomes[1].selected_ids
-    assert str(shared.id) not in outcomes[1].selected_ids
+    assert outcomes[1].selected_ids == [str(shared.id), str(ident("credit-shared"))]
+    assert outcomes[1].autonomous is True
+
+
+def test_stage_b_still_rejects_duplicate_payment_identity():
+    first_payment = payment("first", provider_payment_id="pay_shared")
+    second_payment = payment("second", provider_payment_id="pay_shared")
+    current_settlement = settlement()
+    lines = [
+        line(
+            "payment",
+            current_settlement.id,
+            SettlementLineType.payment,
+            "pay_shared",
+            10_000,
+        ),
+        line("fee", current_settlement.id, SettlementLineType.fee, "FEE-001", -200),
+        line("tax", current_settlement.id, SettlementLineType.tax, "GST-001", -36),
+    ]
+
+    outcomes = reconcile_stage_b(
+        [first_payment, second_payment],
+        [],
+        [current_settlement],
+        lines,
+        [credit("one", current_settlement.id, utr="UTR-one", amount=9_764)],
+    )
+
+    assert outcomes[0].autonomous is True
+    assert outcomes[1].status is ResultStatus.duplicate
     assert outcomes[1].autonomous is False
+    assert any(item.rule_code == "BATCH_COLLISION" for item in outcomes[1].evidence)
+
+
+def test_stage_b_rejects_duplicate_line_references_inside_an_aggregate():
+    current_payment = payment()
+    current_settlement = settlement()
+    lines = [
+        line(
+            "payment",
+            current_settlement.id,
+            SettlementLineType.payment,
+            "pay_one",
+            10_000,
+        ),
+        line("fee-one", current_settlement.id, SettlementLineType.fee, "FEE-DUP", -100),
+        line("fee-two", current_settlement.id, SettlementLineType.fee, "FEE-DUP", -100),
+        line("tax", current_settlement.id, SettlementLineType.tax, "GST-001", -36),
+    ]
+
+    outcome = reconcile_stage_b(
+        [current_payment],
+        [],
+        [current_settlement],
+        lines,
+        [credit("one", current_settlement.id, utr="UTR-one", amount=9_764)],
+    )[0]
+
+    assert outcome.status is ResultStatus.amount_mismatch
+    assert outcome.autonomous is False
+    assert "duplicate_line_reference" in outcome.candidates[0].contradictions
 
 
 def test_stage_b_ambiguous_result_does_not_reserve_provisional_settlement_or_bank_ids():
@@ -938,6 +1044,54 @@ def test_stage_a_exact_chain_with_close_runner_up_is_not_autonomous():
 
     assert outcome.status is ResultStatus.ambiguous
     assert outcome.autonomous is False
+
+
+def test_fixed_benchmark_stage_autonomy_clears_strict_floor():
+    dataset = build_demo_dataset()
+    positive = [case for case in dataset.truth_cases if case.matchable]
+    stage_a = reconcile_stage_a(
+        list(dataset.ledger_entries),
+        list(dataset.razorpay_orders),
+        list(dataset.razorpay_payments),
+        list(dataset.razorpay_refunds),
+    )
+    stage_a_by_ledger = {
+        case.ledger_entry_id: stage_a[index]
+        for index, case in enumerate(dataset.truth_cases[:120])
+    }
+
+    captured = [
+        payment
+        for payment in dataset.razorpay_payments
+        if payment.captured and payment.status is RazorpayPaymentStatus.captured
+    ]
+    stage_b = reconcile_stage_b(
+        list(dataset.razorpay_payments),
+        list(dataset.razorpay_refunds),
+        list(dataset.settlements),
+        list(dataset.settlement_lines),
+        list(dataset.bank_credits),
+    )
+    stage_b_by_payment = {
+        payment.id: outcome for payment, outcome in zip(captured, stage_b)
+    }
+
+    assert (
+        sum(stage_a_by_ledger[case.ledger_entry_id].autonomous for case in positive)
+        >= 69
+    )
+    assert (
+        sum(stage_b_by_payment[case.razorpay_payment_id].autonomous for case in positive)
+        >= 69
+    )
+    assert all(
+        stage_a_by_ledger[case.ledger_entry_id].status is ResultStatus.matched
+        for case in positive
+    )
+    assert all(
+        stage_b_by_payment[case.razorpay_payment_id].status is ResultStatus.matched
+        for case in positive
+    )
 
 
 def test_engine_outcome_schema_serializes_without_truth_labels():

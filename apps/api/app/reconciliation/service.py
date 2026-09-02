@@ -263,6 +263,47 @@ def _add_links_and_exception(
             source = source_index.get(str(selected_id))
             if source is not None:
                 links.append((source[0], source[1].id, "selected"))
+
+        def add_related_order(source: tuple[str, Any]) -> None:
+            source_type, source_row = source
+            provider_order_id: str | None = None
+            if source_type == "razorpay_payment":
+                provider_order_id = source_row.provider_order_id
+            elif source_type == "razorpay_refund":
+                parent_payment = next(
+                    (
+                        row
+                        for row_type, row in source_index.values()
+                        if row_type == "razorpay_payment"
+                        and row.provider_payment_id == source_row.provider_payment_id
+                    ),
+                    None,
+                )
+                provider_order_id = (
+                    parent_payment.provider_order_id if parent_payment is not None else None
+                )
+            if provider_order_id is None:
+                return
+            order = next(
+                (
+                    row
+                    for row_type, row in source_index.values()
+                    if row_type == "razorpay_order"
+                    and row.provider_order_id == provider_order_id
+                ),
+                None,
+            )
+            if order is not None:
+                links.append(("razorpay_order", order.id, "related"))
+
+        if result.primary_source_id is not None:
+            primary_source = source_index.get(str(result.primary_source_id))
+            if primary_source is not None:
+                add_related_order(primary_source)
+        for selected_id in outcome.selected_ids:
+            selected_source = source_index.get(str(selected_id))
+            if selected_source is not None:
+                add_related_order(selected_source)
         seen: set[tuple[str, UUID]] = set()
         for source_type, source_id, role in links:
             key = (source_type, source_id)
@@ -333,183 +374,194 @@ async def run_reconciliation(
     batch_id: UUID,
 ) -> ReconciliationRun:
     """Run both pure deterministic stages against one fixed batch snapshot."""
-    if await session.get(Batch, batch_id) is None:
-        raise ValueError("Reconciliation batch was not found")
-    running = (
-        await session.execute(
-            select(ReconciliationRun).where(
-                ReconciliationRun.batch_id == batch_id,
-                ReconciliationRun.status == RunStatus.running,
-            )
-        )
-    ).scalar_one_or_none()
-    if running is not None:
-        raise RunAlreadyRunning("A reconciliation run is already running for this batch")
-
     started_at = datetime.now(timezone.utc)
-    run = ReconciliationRun(
-        batch_id=batch_id,
-        status=RunStatus.running,
-        started_at=started_at,
-        source_row_count=0,
-        source_counts={},
-    )
-    session.add(run)
-    try:
-        await session.flush()
-        await _audit(
-            session,
-            batch_id=batch_id,
-            event_type=AuditEventType.run_started,
-            entity_type="reconciliation_run",
-            entity_id=run.id,
-            summary="Reconciliation run started",
-        )
-        await session.commit()
-    except IntegrityError as error:
-        await session.rollback()
-        raise RunAlreadyRunning(
-            "A reconciliation run is already running for this batch"
-        ) from error
-
     started_ticks = perf_counter_ns()
     try:
-        batch, source_rows, source_counts = await _load_snapshot(session, batch_id)
-        seeds = _seed_sources(source_rows)
-        source_index = _source_index(source_rows)
-        stage_a_outcomes = reconcile_stage_a(
-            seeds["ledger"],
-            seeds["orders"],
-            seeds["payments"],
-            seeds["refunds"],
-        )
-        stage_b_outcomes = reconcile_stage_b(
-            seeds["payments"],
-            seeds["refunds"],
-            seeds["settlements"],
-            seeds["lines"],
-            seeds["credits"],
-        )
-
-        ledger_rows = source_rows["ledger"]
-        for index, outcome in enumerate(stage_a_outcomes):
-            if index < len(ledger_rows):
-                primary = ledger_rows[index]
-                primary_type = "ledger"
-            else:
-                selected = next(iter(outcome.selected_ids), None)
-                source = source_index.get(str(selected)) if selected else None
-                primary_type = source[0] if source else "source"
-                primary = source[1] if source else None
-            result = _outcome_result(
-                run=run,
-                batch_id=batch.id,
-                outcome=outcome,
-                primary_source_type=primary_type,
-                primary_source_id=primary.id if primary is not None else None,
-                amount=primary.amount if primary is not None else None,
-                currency=primary.currency if primary is not None else None,
-            )
-            session.add(result)
-            await session.flush()
-            _add_links_and_exception(
-                session,
-                run=run,
-                result=result,
-                outcome=outcome,
-                source_index=source_index,
-                batch_id=batch.id,
-            )
-
-        captured_payments = [
-            row
-            for row in source_rows["payments"]
-            if row.captured and _jsonable(row.status) == "captured"
-        ]
-        for payment, outcome in zip(captured_payments, stage_b_outcomes):
-            result = _outcome_result(
-                run=run,
-                batch_id=batch.id,
-                outcome=outcome,
-                primary_source_type="razorpay_payment",
-                primary_source_id=payment.id,
-                amount=payment.amount,
-                currency=payment.currency,
-            )
-            session.add(result)
-            await session.flush()
-            _add_links_and_exception(
-                session,
-                run=run,
-                result=result,
-                outcome=outcome,
-                source_index=source_index,
-                batch_id=batch.id,
-            )
-
-        for row in source_rows["quarantine"]:
-            session.add(
-                ReconciliationException(
-                    run_id=run.id,
-                    result_id=None,
-                    batch_id=batch.id,
-                    status=ExceptionStatus.open,
-                    exception_type="malformed",
-                    source_type="quarantine",
-                    source_id=None,
-                    amount=None,
-                    message="Malformed source row was quarantined before matching.",
+        if await session.get(Batch, batch_id) is None:
+            raise ValueError("Reconciliation batch was not found")
+        running = (
+            await session.execute(
+                select(ReconciliationRun).where(
+                    ReconciliationRun.batch_id == batch_id,
+                    ReconciliationRun.status == RunStatus.running,
                 )
             )
+        ).scalar_one_or_none()
+        if running is not None:
+            raise RunAlreadyRunning(
+                "A reconciliation run is already running for this batch"
+            )
+        await session.rollback()
+        async with session.begin():
+            await session.connection(
+                execution_options={"isolation_level": "REPEATABLE READ"}
+            )
+            run = ReconciliationRun(
+                batch_id=batch_id,
+                status=RunStatus.running,
+                started_at=started_at,
+                source_row_count=0,
+                source_counts={},
+            )
+            session.add(run)
+            try:
+                await session.flush()
+            except IntegrityError as error:
+                raise RunAlreadyRunning(
+                    "A reconciliation run is already running for this batch"
+                ) from error
+            await _audit(
+                session,
+                batch_id=batch_id,
+                event_type=AuditEventType.run_started,
+                entity_type="reconciliation_run",
+                entity_id=run.id,
+                summary="Reconciliation run started",
+            )
+            batch, source_rows, source_counts = await _load_snapshot(session, batch_id)
+            seeds = _seed_sources(source_rows)
+            source_index = _source_index(source_rows)
+            stage_a_outcomes = reconcile_stage_a(
+                seeds["ledger"],
+                seeds["orders"],
+                seeds["payments"],
+                seeds["refunds"],
+            )
+            stage_b_outcomes = reconcile_stage_b(
+                seeds["payments"],
+                seeds["refunds"],
+                seeds["settlements"],
+                seeds["lines"],
+                seeds["credits"],
+            )
 
-        elapsed_ms = max(0, round((perf_counter_ns() - started_ticks) / 1_000_000))
-        run.status = RunStatus.completed
-        run.completed_at = datetime.now(timezone.utc)
-        run.duration_ms = elapsed_ms
-        run.source_counts = source_counts
-        run.source_row_count = source_counts["total"]
-        run.throughput = (
-            round(source_counts["total"] / (elapsed_ms / 1_000), 2)
-            if elapsed_ms
-            else 0.0
-        )
-        await _audit(
-            session,
-            batch_id=batch.id,
-            event_type=AuditEventType.result_persisted,
-            entity_type="reconciliation_run",
-            entity_id=run.id,
-            summary="Deterministic reconciliation results persisted",
-        )
-        await _audit(
-            session,
-            batch_id=batch.id,
-            event_type=AuditEventType.run_completed,
-            entity_type="reconciliation_run",
-            entity_id=run.id,
-            summary="Reconciliation run completed",
-        )
-        await session.commit()
+            ledger_rows = source_rows["ledger"]
+            for index, outcome in enumerate(stage_a_outcomes):
+                if index < len(ledger_rows):
+                    primary = ledger_rows[index]
+                    primary_type = "ledger"
+                else:
+                    selected = next(iter(outcome.selected_ids), None)
+                    source = source_index.get(str(selected)) if selected else None
+                    primary_type = source[0] if source else "source"
+                    primary = source[1] if source else None
+                result = _outcome_result(
+                    run=run,
+                    batch_id=batch.id,
+                    outcome=outcome,
+                    primary_source_type=primary_type,
+                    primary_source_id=primary.id if primary is not None else None,
+                    amount=primary.amount if primary is not None else None,
+                    currency=primary.currency if primary is not None else None,
+                )
+                session.add(result)
+                await session.flush()
+                _add_links_and_exception(
+                    session,
+                    run=run,
+                    result=result,
+                    outcome=outcome,
+                    source_index=source_index,
+                    batch_id=batch.id,
+                )
+
+            captured_payments = [
+                row
+                for row in source_rows["payments"]
+                if row.captured and _jsonable(row.status) == "captured"
+            ]
+            for payment, outcome in zip(captured_payments, stage_b_outcomes):
+                result = _outcome_result(
+                    run=run,
+                    batch_id=batch.id,
+                    outcome=outcome,
+                    primary_source_type="razorpay_payment",
+                    primary_source_id=payment.id,
+                    amount=payment.amount,
+                    currency=payment.currency,
+                )
+                session.add(result)
+                await session.flush()
+                _add_links_and_exception(
+                    session,
+                    run=run,
+                    result=result,
+                    outcome=outcome,
+                    source_index=source_index,
+                    batch_id=batch.id,
+                )
+
+            for row in source_rows["quarantine"]:
+                session.add(
+                    ReconciliationException(
+                        run_id=run.id,
+                        result_id=None,
+                        batch_id=batch.id,
+                        status=ExceptionStatus.open,
+                        exception_type="malformed",
+                        source_type="quarantine",
+                        source_id=None,
+                        amount=None,
+                        message="Malformed source row was quarantined before matching.",
+                    )
+                )
+
+            elapsed_ms = max(0, round((perf_counter_ns() - started_ticks) / 1_000_000))
+            run.status = RunStatus.completed
+            run.completed_at = datetime.now(timezone.utc)
+            run.duration_ms = elapsed_ms
+            run.source_counts = source_counts
+            run.source_row_count = source_counts["total"]
+            run.throughput = (
+                round(source_counts["total"] / (elapsed_ms / 1_000), 2)
+                if elapsed_ms
+                else 0.0
+            )
+            await _audit(
+                session,
+                batch_id=batch.id,
+                event_type=AuditEventType.result_persisted,
+                entity_type="reconciliation_run",
+                entity_id=run.id,
+                summary="Deterministic reconciliation results persisted",
+            )
+            await _audit(
+                session,
+                batch_id=batch.id,
+                event_type=AuditEventType.run_completed,
+                entity_type="reconciliation_run",
+                entity_id=run.id,
+                summary="Reconciliation run completed",
+            )
         return run
+    except (RunAlreadyRunning, ValueError):
+        await session.rollback()
+        raise
     except Exception:
         await session.rollback()
-        failed_run = await session.get(ReconciliationRun, run.id)
-        if failed_run is not None:
-            elapsed_ms = max(0, round((perf_counter_ns() - started_ticks) / 1_000_000))
-            failed_run.status = RunStatus.failed
-            failed_run.completed_at = datetime.now(timezone.utc)
-            failed_run.duration_ms = elapsed_ms
-            failed_run.error_message = "Reconciliation failed before completion."
-            try:
-                await _audit(
-                    session,
-                    batch_id=batch_id,
-                    event_type=AuditEventType.run_failed,
-                    entity_type="reconciliation_run",
-                    entity_id=failed_run.id,
-                    summary="Reconciliation run failed",
-                )
-                await session.commit()
-            except Exception:
-                await session.rollback()
+        elapsed_ms = max(0, round((perf_counter_ns() - started_ticks) / 1_000_000))
+        failed_run = ReconciliationRun(
+            batch_id=batch_id,
+            status=RunStatus.failed,
+            started_at=started_at,
+            completed_at=datetime.now(timezone.utc),
+            duration_ms=elapsed_ms,
+            source_row_count=0,
+            source_counts={},
+            error_message="Reconciliation failed before completion.",
+        )
+        try:
+            session.add(failed_run)
+            await session.flush()
+            await _audit(
+                session,
+                batch_id=batch_id,
+                event_type=AuditEventType.run_failed,
+                entity_type="reconciliation_run",
+                entity_id=failed_run.id,
+                summary="Reconciliation run failed",
+            )
+            await session.commit()
+        except Exception:
+            await session.rollback()
         raise

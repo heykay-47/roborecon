@@ -66,26 +66,41 @@ class ClassMetricsSchema(ApiModel):
     money_unresolved: int
 
 
+class StageMetricsSchema(ApiModel):
+    eligible_cases: int
+    correctly_resolved: int
+    correctness_rate: float
+    autonomous_cases: int
+    autonomy_rate: float
+    autonomous_links: int
+    false_positives: int
+    precision: float
+    unresolved_cases: int
+    open_exceptions: int
+    records_processed: int
+
+
 class EvaluationReportSchema(ApiModel):
     benchmark_available: bool
-    precision: float
-    false_positives: int
-    false_positive_rate: float
-    match_rate: float
-    autonomous_resolution_rate: float
-    correctly_resolved: int
-    matchable_cases: int
-    autonomous_cases: int
+    precision: float | None
+    false_positives: int | None
+    false_positive_rate: float | None
+    match_rate: float | None
+    end_to_end_autonomy_rate: float | None
+    exception_recall: float | None
+    correctly_resolved: int | None
+    matchable_cases: int | None
+    autonomous_cases: int | None
     open_exceptions: int
-    financially_unresolved_cases: int
-    money_reconciled: int
-    money_unresolved: int
+    financially_unresolved_cases: int | None
+    money_reconciled: int | None
+    money_unresolved: int | None
     settlement_net: int
     records_processed: int
     duration_ms: int
     throughput: float
-    per_class: dict[str, ClassMetricsSchema]
-    stage_metrics: dict[str, dict[str, Any]]
+    per_class: dict[str, ClassMetricsSchema] | None
+    stage_metrics: dict[str, StageMetricsSchema] | None
     review_adjusted: dict[str, Any]
     acceptance_checks: dict[str, bool]
     acceptance_passed: bool

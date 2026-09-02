@@ -85,6 +85,7 @@ class _StageACandidate:
     captured: bool
     parent_amount: int | None = None
     parent_record_id: str | None = None
+    order_payment_chain: bool = False
 
 
 def _stage_a_pool(
@@ -123,12 +124,27 @@ def _stage_a_pool(
                     current_payment.captured
                     and _status_value(current_payment.status) == "captured"
                 ),
+                order_payment_chain=(
+                    linked_order is not None
+                    and linked_order.provider_order_id
+                    == current_payment.provider_order_id
+                    and linked_order.amount == current_payment.amount
+                    and linked_order.currency == current_payment.currency
+                    and linked_order.status == "paid"
+                    and current_payment.captured
+                    and _status_value(current_payment.status) == "captured"
+                ),
             )
         )
 
     for current_refund in refunds:
         parent_payment = payments_by_provider_id.get(
             current_refund.provider_payment_id
+        )
+        parent_order = (
+            orders_by_provider_id.get(parent_payment.provider_order_id)
+            if parent_payment is not None
+            else None
         )
         references = [
             current_refund.provider_refund_id,
@@ -155,6 +171,17 @@ def _stage_a_pool(
                 ),
                 parent_record_id=(
                     str(parent_payment.id) if parent_payment is not None else None
+                ),
+                order_payment_chain=(
+                    parent_payment is not None
+                    and parent_order is not None
+                    and parent_order.provider_order_id
+                    == parent_payment.provider_order_id
+                    and parent_order.amount == parent_payment.amount
+                    and parent_order.currency == parent_payment.currency
+                    and parent_order.status == "paid"
+                    and parent_payment.captured
+                    and _status_value(parent_payment.status) == "captured"
                 ),
             )
         )
@@ -278,6 +305,41 @@ def _mark_batch_collision(
             ),
         ),
     )
+
+
+def _stage_b_resource_ids(
+    current_payment: RazorpayPaymentSeed,
+    related_settlements: list[SettlementSeed],
+    lines_by_settlement: dict[Any, list[SettlementLineSeed]],
+    refunds_by_payment: dict[str, list[RazorpayRefundSeed]],
+) -> set[str]:
+    """Return identities that cannot be consumed by two payment cases.
+
+    Settlements and bank credits are aggregate resources. Payment/refund identities
+    and the financial lines that identify them are the consumable resources.
+    """
+    resources = {
+        f"payment_id:{current_payment.id}",
+        f"payment_reference:{normalize_reference(current_payment.provider_payment_id)}",
+    }
+    for refund in refunds_by_payment.get(current_payment.provider_payment_id, []):
+        resources.add(f"refund_id:{refund.id}")
+        resources.add(f"refund_reference:{normalize_reference(refund.provider_refund_id)}")
+    for settlement in related_settlements:
+        for current_line in lines_by_settlement.get(settlement.id, []):
+            kind = _line_kind(current_line)
+            if kind not in {
+                SettlementLineType.payment.value,
+                SettlementLineType.refund.value,
+            } or not _same_reference(
+                current_line.reference, current_payment.provider_payment_id
+            ):
+                continue
+            resources.add(f"line_id:{current_line.id}")
+            resources.add(
+                f"line_reference:{kind}:{normalize_reference(current_line.reference)}"
+            )
+    return resources
 
 
 def _amount_compatible(
@@ -462,6 +524,20 @@ def _stage_a_score(
             "Only captured payments and refunds with a captured parent can reconcile.",
         )
     )
+
+    chain_points = 20 if candidate.order_payment_chain else 0
+    score += chain_points
+    evidence.append(
+        _evidence(
+            "ORDER_PAYMENT_CHAIN",
+            {"verified": candidate.order_payment_chain},
+            chain_points,
+            "pass" if candidate.order_payment_chain else "fail",
+            "Order and captured Payment identifiers, amount, currency, and "
+            "lifecycle agree.",
+        )
+    )
+    score = min(score, 100)
 
     return ScoredCandidate(
         candidate_id=candidate.record_id,
@@ -974,6 +1050,32 @@ def _stage_b_candidate(
         )
     )
 
+    line_reference_counts = Counter(
+        (
+            _line_kind(current_line),
+            normalize_reference(current_line.reference),
+        )
+        for related_settlement in related_settlements
+        for current_line in lines_by_settlement.get(related_settlement.id, [])
+        if normalize_reference(current_line.reference)
+    )
+    duplicate_line_references = sorted(
+        f"{kind}:{reference}"
+        for (kind, reference), count in line_reference_counts.items()
+        if count > 1
+    )
+    if duplicate_line_references:
+        contradictions.append("duplicate_line_reference")
+        evidence.append(
+            _evidence(
+                "LINE_IDENTITY",
+                {"duplicate_references": duplicate_line_references},
+                0,
+                "fail",
+                "Duplicate settlement line references cannot be assigned autonomously.",
+            )
+        )
+
     payment_refunds = refunds_by_payment.get(current_payment.provider_payment_id, [])
     for current_refund in payment_refunds:
         if current_refund.currency != current_payment.currency:
@@ -1161,6 +1263,7 @@ def reconcile_stage_b(
 
         scored_candidates: list[ScoredCandidate] = []
         selected_ids_by_candidate: dict[str, list[str]] = {}
+        resource_ids_by_candidate: dict[str, set[str]] = {}
         candidate_contradictions: dict[str, list[str]] = {}
         collision_candidate_ids: set[str] = set()
         for base_settlement in base_settlements:
@@ -1177,16 +1280,23 @@ def reconcile_stage_b(
                 refunds_by_payment,
                 credits,
             )
-            if _batch_collision_ids(candidate, reserved_ids, selected_ids):
+            resource_ids = _stage_b_resource_ids(
+                current_payment,
+                related_settlements,
+                lines_by_settlement,
+                refunds_by_payment,
+            )
+            if _batch_collision_ids(candidate, reserved_ids, resource_ids):
                 collision_candidate_ids.add(candidate.candidate_id)
             candidate = _mark_batch_collision(
                 candidate,
                 reserved_ids,
-                selected_ids,
+                resource_ids,
             )
             contradictions = list(candidate.contradictions)
             scored_candidates.append(candidate)
             selected_ids_by_candidate[candidate.candidate_id] = selected_ids
+            resource_ids_by_candidate[candidate.candidate_id] = resource_ids
             candidate_contradictions[candidate.candidate_id] = contradictions
 
         selectable_candidates = [
@@ -1235,6 +1345,6 @@ def reconcile_stage_b(
         )
         outcomes.append(outcome)
         if outcome.autonomous:
-            reserved_ids.update(outcome.selected_ids)
+            reserved_ids.update(resource_ids_by_candidate[selected.candidate_id])
 
     return outcomes

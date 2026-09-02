@@ -41,3 +41,80 @@ async def test_metrics_without_a_completed_run_returns_not_found(client):
     response = await client.get("/metrics")
 
     assert response.status_code == 404
+
+
+@pytest.mark.asyncio
+async def test_metrics_for_a_run_without_metrics_returns_unavailable(client, monkeypatch):
+    from types import SimpleNamespace
+    from uuid import uuid4
+
+    from app.common.enums import RunStatus
+    from app.reconciliation import router as reconciliation_router
+
+    run_id = uuid4()
+
+    async def return_failed_run(session, requested_run_id):
+        assert requested_run_id == run_id
+        return SimpleNamespace(id=run_id, status=RunStatus.failed, metrics=None)
+
+    monkeypatch.setattr(reconciliation_router, "_latest_run", return_failed_run)
+
+    response = await client.get(f"/metrics?run_id={run_id}")
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "Run metrics are not available"
+
+
+def test_metrics_schema_serializes_strict_stage_and_end_to_end_fields():
+    from app.reconciliation.schema import EvaluationReportSchema
+
+    stage = {
+        "eligible_cases": 1,
+        "correctly_resolved": 1,
+        "correctness_rate": 100.0,
+        "autonomous_cases": 1,
+        "autonomy_rate": 100.0,
+        "autonomous_links": 3,
+        "false_positives": 0,
+        "precision": 100.0,
+        "unresolved_cases": 0,
+        "open_exceptions": 0,
+        "records_processed": 1,
+    }
+    report = EvaluationReportSchema.model_validate(
+        {
+            "benchmark_available": True,
+            "precision": 100.0,
+            "false_positives": 0,
+            "false_positive_rate": 0.0,
+            "match_rate": 100.0,
+            "end_to_end_autonomy_rate": 100.0,
+            "exception_recall": 100.0,
+            "correctly_resolved": 1,
+            "matchable_cases": 1,
+            "autonomous_cases": 1,
+            "open_exceptions": 0,
+            "financially_unresolved_cases": 0,
+            "money_reconciled": 10_000,
+            "money_unresolved": 0,
+            "settlement_net": 9_764,
+            "records_processed": 1,
+            "duration_ms": 100,
+            "throughput": 10.0,
+            "per_class": None,
+            "stage_metrics": {
+                "ledger_to_razorpay": stage,
+                "razorpay_to_settlement": stage,
+            },
+            "review_adjusted": {},
+            "acceptance_checks": {},
+            "acceptance_passed": True,
+        }
+    )
+
+    serialized = report.model_dump(by_alias=True)
+
+    assert serialized["endToEndAutonomyRate"] == 100.0
+    assert serialized["exceptionRecall"] == 100.0
+    assert serialized["stageMetrics"]["ledger_to_razorpay"]["autonomyRate"] == 100.0
+    assert "autonomousResolutionRate" not in serialized
