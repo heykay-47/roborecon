@@ -22,8 +22,13 @@ class Settings(BaseSettings):
     razorpay_timeout_seconds: float = Field(default=10.0, gt=0, le=60.0)
     gemini_api_key: str | None = None
     groq_api_key: str | None = None
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
+    groq_base_url: str = "https://api.groq.com/openai/v1"
     gemini_model: str = "gemini-2.5-flash"
-    groq_model: str = "llama-3.3-70b-versatile"
+    groq_model: str = "openai/gpt-oss-20b"
+    ai_timeout_seconds: float = Field(default=10.0, gt=0, le=60.0)
+    ai_max_tool_rounds: int = Field(default=4, ge=1, le=4)
+    ai_max_source_ids: int = Field(default=10, ge=1, le=10)
     anthropic_api_key: str | None = None
     cors_origins: str = "http://localhost:5173"
 

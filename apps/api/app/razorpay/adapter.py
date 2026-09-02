@@ -1,6 +1,6 @@
 from dataclasses import dataclass, replace
 from datetime import datetime, timezone
-from typing import Any
+from typing import Any, Literal
 from uuid import UUID, uuid4
 
 import httpx
@@ -124,7 +124,7 @@ class RazorpaySnapshot:
 class _Collection(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
-    entity: str = "collection"
+    entity: Literal["collection"]
     count: StrictInt = Field(ge=0)
     items: list[dict[str, Any]]
 
@@ -134,33 +134,40 @@ class _OrderPayload(BaseModel):
 
     id: str = Field(min_length=1)
     amount: StrictInt = Field(ge=0)
-    currency: str = Field(default="INR", min_length=3, max_length=3)
-    receipt: str | None = None
-    status: str = "created"
-    created_at: StrictInt = 0
+    currency: str = Field(min_length=3, max_length=3)
+    receipt: str = Field(min_length=1)
+    status: Literal["created", "attempted", "paid"]
+    created_at: StrictInt = Field(gt=0)
 
 
 class _PaymentPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str = Field(min_length=1)
-    order_id: str = ""
+    order_id: str = Field(min_length=1)
     amount: StrictInt = Field(ge=0)
-    currency: str = Field(default="INR", min_length=3, max_length=3)
-    status: str = "created"
-    captured: bool | None = None
-    created_at: StrictInt = 0
+    currency: str = Field(min_length=3, max_length=3)
+    status: Literal[
+        "created",
+        "authorized",
+        "captured",
+        "failed",
+        "refunded",
+        "partially_refunded",
+    ]
+    captured: StrictBool | None = None
+    created_at: StrictInt = Field(gt=0)
 
 
 class _RefundPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     id: str = Field(min_length=1)
-    payment_id: str = ""
+    payment_id: str = Field(min_length=1)
     amount: StrictInt = Field(ge=0)
-    currency: str = Field(default="INR", min_length=3, max_length=3)
-    status: str = "processed"
-    created_at: StrictInt = 0
+    currency: str = Field(min_length=3, max_length=3)
+    status: Literal["pending", "processed", "failed"]
+    created_at: StrictInt = Field(gt=0)
 
 
 class _SettlementPayload(BaseModel):
@@ -168,32 +175,48 @@ class _SettlementPayload(BaseModel):
 
     id: str = Field(min_length=1)
     amount: StrictInt = Field(ge=0)
-    currency: str = Field(default="INR", min_length=3, max_length=3)
-    status: str = "processed"
+    currency: str = Field(min_length=3, max_length=3)
+    status: Literal[
+        "created",
+        "initiated",
+        "processed",
+        "failed",
+        "reversed",
+        "partially_processed",
+    ]
     fees: StrictInt = Field(
-        default=0, validation_alias=AliasChoices("fees", "fee")
+        validation_alias=AliasChoices("fees", "fee"), ge=0
     )
-    tax: StrictInt = 0
-    utr: str | None = None
-    created_at: StrictInt = 0
+    tax: StrictInt = Field(ge=0)
+    utr: str = Field(min_length=1)
+    created_at: StrictInt = Field(gt=0)
 
 
 class _ReconPayload(BaseModel):
     model_config = ConfigDict(extra="ignore")
 
     entity_id: str = Field(min_length=1)
-    type: str = "adjustment"
-    debit: StrictInt = 0
-    credit: StrictInt = 0
+    type: Literal[
+        "payment",
+        "refund",
+        "transfer",
+        "fee",
+        "tax",
+        "hold",
+        "release",
+        "adjustment",
+    ]
+    debit: StrictInt = Field(ge=0)
+    credit: StrictInt = Field(ge=0)
     amount: StrictInt = Field(ge=0)
-    currency: str = Field(default="INR", min_length=3, max_length=3)
-    fee: StrictInt = 0
-    tax: StrictInt = 0
+    currency: str = Field(min_length=3, max_length=3)
+    fee: StrictInt = Field(ge=0)
+    tax: StrictInt = Field(ge=0)
     on_hold: StrictBool = False
-    settled: bool = False
-    created_at: StrictInt = 0
-    settled_at: StrictInt | None = None
-    settlement_id: str = ""
+    settled: StrictBool = False
+    created_at: StrictInt = Field(gt=0)
+    settled_at: StrictInt | None = Field(default=None, gt=0)
+    settlement_id: str = Field(min_length=1)
     payment_id: str | None = None
     settlement_utr: str | None = None
     order_id: str | None = None
@@ -212,15 +235,15 @@ def _business_at(timestamp: int) -> datetime:
 def _payment_status(status: str) -> RazorpayPaymentStatus:
     try:
         return RazorpayPaymentStatus(status)
-    except ValueError:
-        return RazorpayPaymentStatus.created
+    except ValueError as exc:
+        raise RazorpayAdapterError(f"Unknown Razorpay payment status: {status}") from exc
 
 
 def _line_type(value: str) -> SettlementLineType:
     try:
         return SettlementLineType(value)
-    except ValueError:
-        return SettlementLineType.adjustment
+    except ValueError as exc:
+        raise RazorpayAdapterError(f"Unknown Razorpay settlement type: {value}") from exc
 
 
 class HttpRazorpaySource(RazorpaySource):
@@ -287,7 +310,7 @@ class HttpRazorpaySource(RazorpaySource):
     ) -> list[dict[str, Any]]:
         items: list[dict[str, Any]] = []
         skip = 0
-        for _ in range(self.max_pages):
+        for page_number in range(self.max_pages):
             params = dict(initial_params or {})
             params.update({"count": self.page_size, "skip": skip})
             try:
@@ -298,10 +321,19 @@ class HttpRazorpaySource(RazorpaySource):
                 raise RazorpayAdapterError(f"Invalid Razorpay response for {path}") from exc
 
             page_items = collection.items
+            if collection.count != len(page_items):
+                raise RazorpayAdapterError(
+                    f"Invalid pagination count for {path}: "
+                    f"count={collection.count}, items={len(page_items)}"
+                )
             items.extend(page_items)
             if len(page_items) < self.page_size:
                 break
             skip += len(page_items)
+            if page_number == self.max_pages - 1:
+                raise RazorpayAdapterError(
+                    f"Razorpay pagination limit reached for {path}"
+                )
         return items
 
     @staticmethod
@@ -384,7 +416,7 @@ class HttpRazorpaySource(RazorpaySource):
                 tax=payload.tax,
                 held_amount=0,
                 currency=payload.currency,
-                utr=payload.utr or payload.id,
+                utr=payload.utr,
                 status=payload.status,
                 business_at=_business_at(payload.created_at),
             )
@@ -394,6 +426,10 @@ class HttpRazorpaySource(RazorpaySource):
         for payload in recon_payload:
             settlement_id = settlement_ids.get(payload.settlement_id)
             if settlement_id is None:
+                if not payload.settlement_utr:
+                    raise RazorpayAdapterError(
+                        "Razorpay source mapping failed: settlement UTR is required"
+                    )
                 settlement_id = uuid4()
                 settlement_ids[payload.settlement_id] = settlement_id
                 settlements_by_id[payload.settlement_id] = SettlementRecord(
@@ -404,7 +440,7 @@ class HttpRazorpaySource(RazorpaySource):
                     tax=0,
                     held_amount=0,
                     currency=payload.currency,
-                    utr=payload.settlement_utr or payload.settlement_id or "unknown",
+                    utr=payload.settlement_utr,
                     status="processed" if payload.settled else "created",
                     business_at=_business_at(payload.settled_at or payload.created_at),
                 )
@@ -415,11 +451,7 @@ class HttpRazorpaySource(RazorpaySource):
                 tax=settlement.tax or payload.tax,
                 held_amount=settlement.held_amount
                 + (payload.amount if payload.on_hold else 0),
-                utr=(
-                    settlement.utr
-                    if settlement.utr != payload.settlement_id or not payload.settlement_utr
-                    else payload.settlement_utr
-                ),
+                utr=settlement.utr,
             )
             line_amount = payload.amount if payload.credit >= payload.debit else -payload.amount
             line_time = _business_at(payload.settled_at or payload.created_at)
@@ -460,24 +492,12 @@ class HttpRazorpaySource(RazorpaySource):
                 )
 
         settlements = tuple(settlements_by_id.values())
-        bank_credits = tuple(
-            BankCreditRecord(
-                id=uuid4(),
-                settlement_id=settlement.id,
-                utr=settlement.utr,
-                amount=settlement.amount,
-                currency=settlement.currency,
-                business_at=settlement.business_at,
-            )
-            for settlement in settlements
-        )
         return RazorpaySnapshot(
             razorpay_orders=orders,
             razorpay_payments=payments,
             razorpay_refunds=refunds,
             settlements=settlements,
             settlement_lines=tuple(lines),
-            bank_credits=bank_credits,
         )
 
 
@@ -564,11 +584,6 @@ class DemoRazorpaySource(RazorpaySource):
                     -10000,
                     "INR",
                     now,
-                ),
-            ),
-            bank_credits=(
-                BankCreditRecord(
-                    uuid4(), settlement_id, "UTR-TEST-001", 211500, "INR", now
                 ),
             ),
         )

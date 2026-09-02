@@ -538,6 +538,7 @@ async def run_reconciliation(
                 entity_id=run.id,
                 summary="Reconciliation run completed",
             )
+        await _investigate_after_commit(session, run)
         return run
     except (RunAlreadyRunning, ValueError):
         await session.rollback()
@@ -570,3 +571,17 @@ async def run_reconciliation(
         except Exception:
             await session.rollback()
         raise
+
+
+async def _investigate_after_commit(
+    session: AsyncSession,
+    run: ReconciliationRun,
+) -> None:
+    """Run the bounded advisory portfolio without changing deterministic outcomes."""
+    try:
+        from app.ai.investigator import investigate_completed_run
+
+        await investigate_completed_run(session, run.id)
+    except Exception:
+        # Provider, tool, or optional AI persistence failures are fail-safe.
+        return

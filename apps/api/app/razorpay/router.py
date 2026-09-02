@@ -37,32 +37,21 @@ def source_from_settings() -> RazorpaySource:
 async def sync_snapshot(
     session: AsyncSession, source: RazorpaySource
 ) -> tuple[Batch, dict[str, int]]:
-    """Fetch before opening the transaction so failed imports leave prior data intact."""
-    try:
-        snapshot = await source.fetch_snapshot()
-    except (RazorpayAdapterError, OSError) as exc:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail="Razorpay test-mode sync failed",
-        ) from exc
-
-    now = datetime.now(timezone.utc)
-    counts = source_counts(snapshot)
+    """Persist one isolated source batch with explicit success/failure lifecycle."""
+    started_at = datetime.now(timezone.utc)
     batch = Batch(
         id=uuid4(),
         kind=BatchKind.test_mode_sync,
-        status=BatchStatus.completed,
+        status=BatchStatus.running,
         seed="razorpay-test-mode",
         ground_truth_available=False,
-        source_row_count=counts["total"],
-        started_at=now,
-        completed_at=now,
+        source_row_count=0,
+        started_at=started_at,
     )
 
     async with session.begin():
         session.add(batch)
         await session.flush()
-        await persist_source_records(session, snapshot, batch)
         session.add(
             AuditEvent(
                 batch_id=batch.id,
@@ -71,22 +60,64 @@ async def sync_snapshot(
                 actor="razorpay",
                 entity_type="batch",
                 entity_id=batch.id,
-                occurred_at=now,
+                occurred_at=started_at,
                 summary="Razorpay test-mode sync started",
             )
         )
-        session.add(
-            AuditEvent(
-                batch_id=batch.id,
-                event_type=AuditEventType.razorpay_sync_completed,
-                sequence=2,
-                actor="razorpay",
-                entity_type="batch",
-                entity_id=batch.id,
-                occurred_at=now,
-                summary="Razorpay test-mode sync completed",
+
+    async def mark_failed() -> None:
+        failed_at = datetime.now(timezone.utc)
+        batch.status = BatchStatus.failed
+        batch.completed_at = failed_at
+        async with session.begin():
+            session.add(
+                AuditEvent(
+                    batch_id=batch.id,
+                    event_type=AuditEventType.razorpay_sync_failed,
+                    sequence=2,
+                    actor="razorpay",
+                    entity_type="batch",
+                    entity_id=batch.id,
+                    occurred_at=failed_at,
+                    summary="Razorpay test-mode sync failed",
+                )
             )
-        )
+
+    try:
+        snapshot = await source.fetch_snapshot()
+    except (RazorpayAdapterError, OSError) as exc:
+        await mark_failed()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Razorpay test-mode sync failed",
+        ) from exc
+
+    try:
+        counts = source_counts(snapshot)
+        completed_at = datetime.now(timezone.utc)
+        async with session.begin():
+            await persist_source_records(session, snapshot, batch)
+            batch.status = BatchStatus.completed
+            batch.source_row_count = counts["total"]
+            batch.completed_at = completed_at
+            session.add(
+                AuditEvent(
+                    batch_id=batch.id,
+                    event_type=AuditEventType.razorpay_sync_completed,
+                    sequence=2,
+                    actor="razorpay",
+                    entity_type="batch",
+                    entity_id=batch.id,
+                    occurred_at=completed_at,
+                    summary="Razorpay test-mode sync completed",
+                )
+            )
+    except Exception as exc:
+        await mark_failed()
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail="Razorpay test-mode sync failed",
+        ) from exc
     return batch, counts
 
 

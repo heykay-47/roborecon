@@ -2,8 +2,10 @@ from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from sqlalchemy import text
 
 from app.ask.router import router as ask_router
+from app.ai.model import AIInvestigationRecord  # noqa: F401
 from app.audit.model import AuditEvent  # noqa: F401
 from app.bank.model import BankTransferPayment  # noqa: F401
 from app.bank.router import router as bank_router
@@ -46,12 +48,29 @@ from app.settlement.model import BankCredit, Settlement, SettlementLine  # noqa:
 from app.stripe.model import StripePayment  # noqa: F401
 from app.stripe.router import router as stripe_router
 
+_RAZORPAY_AUDIT_EVENT_VALUES = (
+    "razorpay_sync_started",
+    "razorpay_sync_completed",
+    "razorpay_sync_failed",
+)
+
+
+async def _ensure_audit_event_enum_values(connection) -> None:
+    for value in _RAZORPAY_AUDIT_EVENT_VALUES:
+        await connection.execute(
+            text(
+                "ALTER TYPE auditeventtype ADD VALUE IF NOT EXISTS "
+                f"'{value}'"
+            )
+        )
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Startup: create tables and test connection
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
+        await _ensure_audit_event_enum_values(conn)
     print("Database tables created")
     yield
     # Shutdown: close all connections
