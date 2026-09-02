@@ -1,4 +1,5 @@
 from datetime import datetime, timezone
+from types import SimpleNamespace
 
 import pytest
 
@@ -16,6 +17,14 @@ class _Transaction:
         return False
 
 
+class _AuditResult:
+    def scalar_one_or_none(self):
+        return SimpleNamespace()
+
+    def scalar_one(self):
+        return 0
+
+
 class _Session:
     def __init__(self):
         self.deleted = []
@@ -26,6 +35,7 @@ class _Session:
 
     async def execute(self, statement):
         self.deleted.append(statement)
+        return _AuditResult()
 
     def add(self, value):
         self.added.append(value)
@@ -73,7 +83,7 @@ async def test_reset_demo_persists_source_and_truth_in_one_transaction():
     second = await reset_demo(session)
 
     assert first.id == second.id == build_demo_dataset().batch_id
-    assert len(session.deleted) == 2 * 12
+    assert len(session.deleted) == 2 * (12 + 2)
     assert session.added[-1].event_type.value == "demo.reset.completed"
 
 

@@ -10,6 +10,7 @@ from app.common.enums import (
     ExceptionStatus,
     ReconciliationStage,
     ResultStatus,
+    ReviewAction,
     RunStatus,
 )
 from app.evaluation.model import EVALUATION_REPORT_VERSION
@@ -139,6 +140,8 @@ class MatchLinkResponse(ApiModel):
 
 class ExceptionResponse(ApiModel):
     exception_id: UUID = Field(validation_alias="id", serialization_alias="exceptionId")
+    run_id: UUID | None = Field(default=None, serialization_alias="runId")
+    batch_id: UUID | None = Field(default=None, serialization_alias="batchId")
     result_id: UUID | None = Field(default=None, serialization_alias="resultId")
     status: ExceptionStatus
     exception_type: str
@@ -146,6 +149,90 @@ class ExceptionResponse(ApiModel):
     source_id: UUID | None
     amount: int | None
     message: str
+    review_note: str | None = None
+    reviewed_by: str | None = None
+    reviewed_at: datetime | None = None
+
+
+class ReviewRequest(ApiModel):
+    action: ReviewAction
+    candidate_id: UUID | None = Field(default=None, serialization_alias="candidateId")
+    note: str | None = Field(default=None, max_length=4000)
+    actor: str = Field(default="human", min_length=1, max_length=100)
+
+
+class ReviewDecision(ApiModel):
+    exception_id: UUID = Field(validation_alias="id", serialization_alias="exceptionId")
+    result_id: UUID | None = Field(default=None, serialization_alias="resultId")
+    action: ReviewAction
+    status: ExceptionStatus
+    candidate_id: UUID | None = Field(default=None, serialization_alias="candidateId")
+    note: str | None = None
+    actor: str
+    reviewed_at: datetime
+    link_id: UUID | None = Field(default=None, serialization_alias="linkId")
+
+
+class AIInvestigationResponse(ApiModel):
+    investigation_id: UUID = Field(validation_alias="id", serialization_alias="investigationId")
+    exception_id: UUID = Field(serialization_alias="exceptionId")
+    run_id: UUID = Field(serialization_alias="runId")
+    batch_id: UUID = Field(serialization_alias="batchId")
+    mode: str
+    provider: str | None
+    model: str | None
+    recommendation: str
+    confidence: int
+    citations: list[dict[str, Any]]
+    tool_trace: list[dict[str, Any]]
+    error_code: str | None
+    error_message: str | None
+
+
+class AuditEventResponse(ApiModel):
+    event_id: UUID = Field(validation_alias="id", serialization_alias="eventId")
+    batch_id: UUID | None = Field(default=None, serialization_alias="batchId")
+    event_type: str = Field(serialization_alias="eventType")
+    sequence: int
+    actor: str
+    entity_type: str = Field(serialization_alias="entityType")
+    entity_id: UUID | None = Field(default=None, serialization_alias="entityId")
+    source_type: str | None = Field(default=None, serialization_alias="sourceType")
+    source_id: UUID | None = Field(default=None, serialization_alias="sourceId")
+    occurred_at: datetime = Field(serialization_alias="occurredAt")
+    summary: str
+    tool_trace: dict[str, Any] | None = Field(default=None, serialization_alias="toolTrace")
+
+
+class AuditEventListResponse(ApiModel):
+    items: list[AuditEventResponse]
+    total: int
+    page: int = 1
+    page_size: int = 50
+
+
+class ExceptionDetailResponse(ExceptionResponse):
+    result: ReconciliationResultResponse | None = None
+    source_summaries: list[dict[str, Any]] = Field(
+        default_factory=list, serialization_alias="sourceSummaries"
+    )
+    criterion_evidence: list[CriterionEvidenceSchema] = Field(
+        default_factory=list, serialization_alias="criterionEvidence"
+    )
+    arithmetic: dict[str, Any] = Field(default_factory=dict)
+    ai_investigations: list[AIInvestigationResponse] = Field(
+        default_factory=list, serialization_alias="aiInvestigations"
+    )
+    audit_events: list[AuditEventResponse] = Field(
+        default_factory=list, serialization_alias="auditEvents"
+    )
+
+
+class ExceptionListResponse(ApiModel):
+    items: list[ExceptionResponse]
+    total: int
+    page: int = 1
+    page_size: int = 50
 
 
 class ReconciliationRunResponse(ApiModel):

@@ -26,7 +26,6 @@ from app.reconciliation.schema import (
 )
 from app.reconciliation.service import RunAlreadyRunning, run_reconciliation
 
-
 router = APIRouter(prefix="/reconciliation-runs", tags=["reconciliation-runs"])
 metrics_router = APIRouter(tags=["metrics"])
 

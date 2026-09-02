@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import delete
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit import service as audit_service
 from app.audit.model import AuditEvent
 from app.batch.model import Batch, IngestionRecord
 from app.common.enums import AuditEventType, BatchKind, BatchStatus
@@ -125,17 +126,14 @@ async def reset_demo(session: AsyncSession) -> Batch:
         await session.flush()
         await persist_demo_sources(session, dataset, batch)
         await persist_demo_truth(session, dataset, batch)
-        session.add(
-            AuditEvent(
-                batch_id=batch.id,
-                event_type=AuditEventType.demo_reset_completed,
-                sequence=1,
-                actor="demo",
-                entity_type="batch",
-                entity_id=batch.id,
-                occurred_at=now,
-                summary="Demo benchmark reset completed",
-            )
+        await audit_service.append_event(
+            session,
+            batch_id=batch.id,
+            event_type=AuditEventType.demo_reset_completed,
+            actor="demo",
+            entity_type="batch",
+            entity_id=batch.id,
+            summary="Demo benchmark reset completed",
         )
 
     return batch

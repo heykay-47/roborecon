@@ -8,9 +8,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.model import (
-    MAX_SOURCE_IDS_PER_CALL,
     InvestigationContext,
 )
+from app.config import settings
 from app.ledger.model import LedgerEntry
 from app.razorpay.model import RazorpayOrder, RazorpayPayment, RazorpayRefund
 from app.reconciliation.model import (
@@ -30,6 +30,10 @@ class UnknownToolError(ToolError):
 
 
 class ToolInputError(ToolError):
+    pass
+
+
+class ToolOutputLimitError(ToolError):
     pass
 
 
@@ -182,7 +186,13 @@ def _source_record(source_type: str, row: Any) -> dict[str, Any]:
     }
 
 
-def _ids(arguments: Mapping[str, Any], *, required: bool = True) -> list[UUID]:
+def _ids(
+    arguments: Mapping[str, Any],
+    *,
+    required: bool = True,
+    max_source_ids: int | None = None,
+) -> list[UUID]:
+    source_id_limit = max_source_ids or settings.ai_max_source_ids
     value = arguments.get(
         "source_ids",
         arguments.get(
@@ -192,9 +202,9 @@ def _ids(arguments: Mapping[str, Any], *, required: bool = True) -> list[UUID]:
     )
     if value is None and not required:
         return []
-    if not isinstance(value, list) or len(value) > MAX_SOURCE_IDS_PER_CALL:
+    if not isinstance(value, list) or len(value) > source_id_limit:
         raise ToolInputError(
-            f"source_ids must contain at most {MAX_SOURCE_IDS_PER_CALL} IDs"
+            f"source_ids must contain at most {source_id_limit} IDs"
         )
     try:
         return [UUID(str(item)) for item in value]
@@ -205,9 +215,18 @@ def _ids(arguments: Mapping[str, Any], *, required: bool = True) -> list[UUID]:
 class ToolExecutor:
     """Application-owned read-only tool boundary for one exception context."""
 
-    def __init__(self, session: AsyncSession, context: InvestigationContext):
+    def __init__(
+        self,
+        session: AsyncSession,
+        context: InvestigationContext,
+        *,
+        max_source_ids: int | None = None,
+        max_tool_rows: int | None = None,
+    ):
         self.session = session
         self.context = context
+        self.max_source_ids = max_source_ids or settings.ai_max_source_ids
+        self.max_tool_rows = max_tool_rows or settings.ai_max_tool_rows
 
     async def execute(
         self,
@@ -231,6 +250,8 @@ class ToolExecutor:
     async def get_run_metrics(
         self, _arguments: Mapping[str, Any] | None = None
     ) -> dict[str, Any]:
+        if self.context.run_id is None:
+            raise ToolInputError("Run ID is required for run metrics")
         run = await self.session.get(ReconciliationRun, self.context.run_id)
         if run is None or run.batch_id != self.context.batch_id:
             raise ToolInputError("Run is outside the investigation batch")
@@ -261,11 +282,19 @@ class ToolExecutor:
         self, _arguments: Mapping[str, Any] | None = None
     ) -> dict[str, Any]:
         exception = await self.session.get(ReconciliationException, self.context.exception_id)
-        if exception is None or exception.batch_id != self.context.batch_id:
+        if exception is None or (
+            exception.batch_id != self.context.batch_id
+            or exception.run_id != self.context.run_id
+        ):
             raise ToolInputError("Exception is outside the investigation batch")
         result = None
         if exception.result_id is not None:
             result = await self.session.get(ReconciliationResult, exception.result_id)
+            if result is None or (
+                result.batch_id != self.context.batch_id
+                or result.run_id != self.context.run_id
+            ):
+                raise ToolInputError("Linked result is outside the investigation run")
         return {
             "exceptionId": str(exception.id),
             "exceptionType": exception.exception_type,
@@ -292,7 +321,7 @@ class ToolExecutor:
         self, arguments: Mapping[str, Any] | None = None
     ) -> dict[str, Any]:
         arguments = arguments or {}
-        source_ids = _ids(arguments)
+        source_ids = _ids(arguments, max_source_ids=self.max_source_ids)
         allowed = set(self.context.allowed_source_ids)
         outside_batch = [source_id for source_id in source_ids if source_id not in allowed]
         if outside_batch:
@@ -307,10 +336,8 @@ class ToolExecutor:
                         model.batch_id == self.context.batch_id,
                     )
                 )
-                row = result.scalars().first() if hasattr(result.scalars(), "first") else None
-                if row is None:
-                    rows = result.scalars().all()
-                    row = rows[0] if rows else None
+                rows = result.scalars().all()
+                row = rows[0] if rows else None
                 if row is not None:
                     records.append({"sourceType": source_type, **_source_record(source_type, row)})
                     found = True
@@ -329,7 +356,7 @@ class ToolExecutor:
         self, arguments: Mapping[str, Any] | None = None
     ) -> dict[str, Any]:
         arguments = arguments or {}
-        settlement_ids = _ids(arguments)
+        settlement_ids = _ids(arguments, max_source_ids=self.max_source_ids)
         allowed = set(self.context.allowed_source_ids)
         if any(source_id not in allowed for source_id in settlement_ids):
             raise CrossBatchSourceError("Settlement ID is not part of the current batch")
@@ -348,12 +375,16 @@ class ToolExecutor:
             BankCredit,
             BankCredit.settlement_id.in_(settlement_id_set),
         )
+        if len(lines) + len(credits) > self.max_tool_rows:
+            raise ToolOutputLimitError("Settlement breakdown exceeded the row limit")
 
         captured = sum(row.amount for row in lines if _value(row.line_type) == "payment")
-        refunds = sum(row.amount for row in lines if _value(row.line_type) == "refund")
-        fees = sum(row.amount for row in lines if _value(row.line_type) == "fee")
-        tax = sum(row.amount for row in lines if _value(row.line_type) == "tax")
-        held = sum(row.amount for row in lines if _value(row.line_type) == "hold")
+        refunds = sum(
+            abs(row.amount) for row in lines if _value(row.line_type) == "refund"
+        )
+        fees = sum(abs(row.amount) for row in lines if _value(row.line_type) == "fee")
+        tax = sum(abs(row.amount) for row in lines if _value(row.line_type) == "tax")
+        held = sum(abs(row.amount) for row in lines if _value(row.line_type) == "hold")
         releases = sum(row.amount for row in lines if _value(row.line_type) == "release")
         adjustments = sum(
             row.amount for row in lines if _value(row.line_type) == "adjustment"
@@ -390,6 +421,11 @@ class ToolExecutor:
 
     async def _rows(self, model: Any, condition: Any) -> list[Any]:
         result = await self.session.execute(
-            select(model).where(model.batch_id == self.context.batch_id, condition)
+            select(model)
+            .where(model.batch_id == self.context.batch_id, condition)
+            .limit(self.max_tool_rows + 1)
         )
-        return list(result.scalars().all())
+        rows = list(result.scalars().all())
+        if len(rows) > self.max_tool_rows:
+            raise ToolOutputLimitError("Tool output exceeded the row limit")
+        return rows

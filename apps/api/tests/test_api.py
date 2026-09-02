@@ -1,4 +1,5 @@
 from unittest.mock import AsyncMock
+from uuid import uuid4
 
 import pytest
 
@@ -23,6 +24,41 @@ async def test_batches_and_transactions_use_paginated_items(client):
     assert transactions.status_code == 200
     assert batches.json()["items"] == []
     assert transactions.json()["items"] == []
+
+
+@pytest.mark.asyncio
+async def test_exception_and_audit_collections_are_paginated(client):
+    exceptions = await client.get("/exceptions?page=1&page_size=10")
+    audit_events = await client.get("/audit-events?page=1&page_size=10")
+
+    assert exceptions.status_code == 200
+    assert exceptions.json() == {
+        "items": [],
+        "total": 0,
+        "page": 1,
+        "pageSize": 10,
+    }
+    assert audit_events.status_code == 200
+    assert audit_events.json() == {
+        "items": [],
+        "total": 0,
+        "page": 1,
+        "pageSize": 10,
+    }
+
+
+@pytest.mark.asyncio
+async def test_exception_endpoints_return_not_found_for_absent_ids(client):
+    exception_id = uuid4()
+
+    detail = await client.get(f"/exceptions/{exception_id}")
+    review = await client.post(
+        f"/exceptions/{exception_id}/review",
+        json={"action": "reject", "actor": "analyst-7"},
+    )
+
+    assert detail.status_code == 404
+    assert review.status_code == 404
 
 
 @pytest.mark.asyncio

@@ -5,11 +5,11 @@ from time import perf_counter_ns
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audit.model import AuditEvent
+from app.audit import service as audit_service
 from app.batch.model import Batch, IngestionRecord
 from app.common.enums import (
     AuditEventType,
@@ -17,6 +17,7 @@ from app.common.enums import (
     ReconciliationStage,
     RunStatus,
 )
+from app.database import async_session
 from app.demo.dataset import (
     BankCreditSeed,
     LedgerEntrySeed,
@@ -353,24 +354,14 @@ async def _audit(
     entity_id: UUID | None,
     summary: str,
 ) -> None:
-    sequence = (
-        await session.execute(
-            select(func.coalesce(func.max(AuditEvent.sequence), 0)).where(
-                AuditEvent.batch_id == batch_id
-            )
-        )
-    ).scalar_one()
-    session.add(
-        AuditEvent(
-            batch_id=batch_id,
-            event_type=event_type,
-            sequence=int(sequence) + 1,
-            actor="system",
-            entity_type=entity_type,
-            entity_id=entity_id,
-            occurred_at=datetime.now(timezone.utc),
-            summary=summary,
-        )
+    await audit_service.append_event(
+        session,
+        batch_id=batch_id,
+        event_type=event_type,
+        actor="system",
+        entity_type=entity_type,
+        entity_id=entity_id,
+        summary=summary,
     )
 
 
@@ -578,10 +569,16 @@ async def _investigate_after_commit(
     run: ReconciliationRun,
 ) -> None:
     """Run the bounded advisory portfolio without changing deterministic outcomes."""
+    if run.id is None:
+        return
     try:
         from app.ai.investigator import investigate_completed_run
 
-        await investigate_completed_run(session, run.id)
+        async with async_session() as ai_session:
+            try:
+                await investigate_completed_run(ai_session, run.id)
+            except Exception:
+                await ai_session.rollback()
     except Exception:
-        # Provider, tool, or optional AI persistence failures are fail-safe.
+        # Provider, tool, or isolated AI-session failures are fail-safe.
         return

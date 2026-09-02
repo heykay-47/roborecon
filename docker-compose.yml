@@ -68,6 +68,7 @@ services:
       AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-10}
       AI_MAX_TOOL_ROUNDS: ${AI_MAX_TOOL_ROUNDS:-4}
       AI_MAX_SOURCE_IDS: ${AI_MAX_SOURCE_IDS:-10}
+      AI_MAX_TOOL_ROWS: ${AI_MAX_TOOL_ROWS:-100}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
     depends_on:
@@ -98,6 +99,7 @@ services:
       AI_TIMEOUT_SECONDS: ${AI_TIMEOUT_SECONDS:-10}
       AI_MAX_TOOL_ROUNDS: ${AI_MAX_TOOL_ROUNDS:-4}
       AI_MAX_SOURCE_IDS: ${AI_MAX_SOURCE_IDS:-10}
+      AI_MAX_TOOL_ROWS: ${AI_MAX_TOOL_ROWS:-100}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
     command: ["python", "-m", "pytest", "-q"]

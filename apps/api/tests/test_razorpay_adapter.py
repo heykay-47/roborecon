@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+from types import SimpleNamespace
 from uuid import UUID
 
 import httpx
@@ -290,6 +291,14 @@ class _Transaction:
         return False
 
 
+class _AuditResult:
+    def scalar_one_or_none(self):
+        return SimpleNamespace()
+
+    def scalar_one(self):
+        return 0
+
+
 class _Session:
     def __init__(self):
         self.added = []
@@ -302,6 +311,9 @@ class _Session:
 
     def add_all(self, values):
         self.added.extend(values)
+
+    async def execute(self, _statement):
+        return _AuditResult()
 
     async def flush(self):
         return None

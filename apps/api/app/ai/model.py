@@ -11,9 +11,6 @@ from sqlalchemy.orm import Mapped, mapped_column
 
 from app.common.base import Base
 
-MAX_TOOL_ROUNDS = 4
-MAX_SOURCE_IDS_PER_CALL = 10
-
 
 class InvestigationMode(str, enum.Enum):
     provider = "provider"
@@ -50,7 +47,7 @@ class InvestigationContext(BaseModel):
 
     exception_id: uuid.UUID
     batch_id: uuid.UUID
-    run_id: uuid.UUID
+    run_id: uuid.UUID | None = None
     exception_type: str
     exception_message: str = ""
     amount: int | None = None

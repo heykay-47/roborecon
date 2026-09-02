@@ -1,16 +1,13 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from datetime import datetime, timezone
 from typing import Any
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.model import (
-    MAX_SOURCE_IDS_PER_CALL,
-    MAX_TOOL_ROUNDS,
     AIInvestigation,
     Citation,
     InvestigationContext,
@@ -28,10 +25,12 @@ from app.ai.tools import (
     CrossBatchSourceError,
     ToolError,
     ToolExecutor,
+    ToolOutputLimitError,
     UnknownToolError,
 )
-from app.audit.model import AuditEvent
+from app.audit import service as audit_service
 from app.common.enums import AuditEventType, ExceptionStatus, RunStatus
+from app.config import settings
 from app.reconciliation.model import (
     ReconciliationException,
     ReconciliationResult,
@@ -54,6 +53,7 @@ _ERROR_MESSAGES = {
     "cross_batch_source": "The AI provider requested a source outside this batch.",
     "source_id_limit": "The AI provider requested too many source IDs.",
     "tool_round_limit": "The AI provider exceeded the tool round limit.",
+    "tool_output_limit": "A read-only tool returned too many rows.",
     "invalid_citation": "The AI provider returned an invalid citation.",
     "tool_error": "A read-only investigation tool rejected the request.",
 }
@@ -71,6 +71,10 @@ def _exception_context(
     run: ReconciliationRun,
     result: ReconciliationResult | None,
 ) -> InvestigationContext:
+    if result is not None and (
+        result.batch_id != exception.batch_id or result.run_id != run.id
+    ):
+        raise ValueError("Reconciliation result is outside the investigation run")
     allowed: list[UUID] = []
     references: list[Citation] = []
 
@@ -149,6 +153,8 @@ def _error_code(error: BaseException, provider: Any) -> str:
         return "unknown_tool"
     if isinstance(error, CrossBatchSourceError):
         return "cross_batch_source"
+    if isinstance(error, ToolOutputLimitError):
+        return "tool_output_limit"
     if isinstance(error, ToolError):
         if "maximum tool rounds" in str(error).lower():
             return "tool_round_limit"
@@ -174,7 +180,9 @@ def _safe_tool_trace(
     }
     raw_ids = request.arguments.get("source_ids", request.arguments.get("sourceIds", []))
     if isinstance(raw_ids, list):
-        trace["sourceIds"] = [str(item)[:80] for item in raw_ids[:MAX_SOURCE_IDS_PER_CALL]]
+        trace["sourceIds"] = [
+            str(item)[:80] for item in raw_ids[: settings.ai_max_source_ids]
+        ]
     if error_code is not None:
         trace["error"] = error_code
     return trace
@@ -200,13 +208,10 @@ def _valid_citations(
         (citation.source_type, citation.source_id)
         for citation in context.source_references
     }
-    valid_ids = set(context.allowed_source_ids)
     for result in context.tool_results:
         valid.update((citation.source_type, citation.source_id) for citation in result.citations)
-        valid_ids.update(citation.source_id for citation in result.citations)
     return all(
         (citation.source_type, citation.source_id) in valid
-        or citation.source_id in valid_ids
         for citation in recommendation.citations
     )
 
@@ -218,7 +223,7 @@ async def _run_provider(
     trace: list[dict[str, Any]],
 ) -> ProviderRecommendation:
     active_context = context
-    for round_number in range(1, MAX_TOOL_ROUNDS + 1):
+    for round_number in range(1, settings.ai_max_tool_rounds + 1):
         recommendation = _normalise_recommendation(
             await provider.investigate(active_context), provider
         )
@@ -251,7 +256,7 @@ async def _run_provider(
         raw_ids = request.arguments.get(
             "source_ids", request.arguments.get("sourceIds", [])
         )
-        if isinstance(raw_ids, list) and len(raw_ids) > MAX_SOURCE_IDS_PER_CALL:
+        if isinstance(raw_ids, list) and len(raw_ids) > settings.ai_max_source_ids:
             trace.append(
                 _safe_tool_trace(
                     round_number=round_number,
@@ -299,7 +304,7 @@ async def _run_provider(
                 "tool_results": [*active_context.tool_results, tool_result],
             }
         )
-        if round_number == MAX_TOOL_ROUNDS:
+        if round_number == settings.ai_max_tool_rounds:
             raise ToolError("Maximum tool rounds exceeded")
     raise ToolError("Maximum tool rounds exceeded")
 
@@ -364,51 +369,36 @@ async def _audit_investigation(
     investigation: AIInvestigation,
 ) -> None:
     try:
-        sequence = (
-            await session.execute(
-                select(func.coalesce(func.max(AuditEvent.sequence), 0)).where(
-                    AuditEvent.batch_id == investigation.batch_id
-                )
-            )
-        ).scalar()
-        next_sequence = int(sequence or 0) + 1
         for trace in investigation.tool_trace:
             if trace.get("tool") is None:
                 continue
-            session.add(
-                AuditEvent(
-                    batch_id=investigation.batch_id,
-                    event_type=AuditEventType.ai_tool_called,
-                    sequence=next_sequence,
-                    actor="ai",
-                    entity_type="reconciliation_exception",
-                    entity_id=investigation.exception_id,
-                    occurred_at=datetime.now(timezone.utc),
-                    summary=f"AI read-only tool {trace.get('tool', 'unknown')} called",
-                    tool_trace=trace,
-                )
-            )
-            next_sequence += 1
-        session.add(
-            AuditEvent(
+            await audit_service.append_event(
+                session,
                 batch_id=investigation.batch_id,
-                event_type=AuditEventType.ai_recommendation,
-                sequence=next_sequence,
+                event_type=AuditEventType.ai_tool_called,
                 actor="ai",
                 entity_type="reconciliation_exception",
                 entity_id=investigation.exception_id,
-                occurred_at=datetime.now(timezone.utc),
-                summary="AI advisory recommendation recorded",
-                tool_trace={
-                    "mode": investigation.mode.value,
-                    "provider": investigation.provider,
-                    "model": investigation.model,
-                    "error": investigation.error_code,
-                    "citations": [
-                        item.model_dump(mode="json") for item in investigation.citations
-                    ],
-                },
+                summary=f"AI read-only tool {trace.get('tool', 'unknown')} called",
+                tool_trace=trace,
             )
+        await audit_service.append_event(
+            session,
+            batch_id=investigation.batch_id,
+            event_type=AuditEventType.ai_recommendation,
+            actor="ai",
+            entity_type="reconciliation_exception",
+            entity_id=investigation.exception_id,
+            summary="AI advisory recommendation recorded",
+            tool_trace={
+                "mode": investigation.mode.value,
+                "provider": investigation.provider,
+                "model": investigation.model,
+                "error": investigation.error_code,
+                "citations": [
+                    item.model_dump(mode="json") for item in investigation.citations
+                ],
+            },
         )
     except Exception:
         # AI audit persistence is advisory and must never alter the exception outcome.
@@ -488,7 +478,13 @@ async def investigate_exception(
 def _risk_class(exception: Any) -> str | None:
     value = str(getattr(exception, "exception_type", "")).lower().replace("-", "_")
     message = str(getattr(exception, "message", "")).lower()
-    combined = f"{value} {message}"
+    result = getattr(exception, "_ai_result", None)
+    result_details = ""
+    if result is not None:
+        result_details = str(
+            [getattr(result, "evidence", []), getattr(result, "candidates", [])]
+        ).lower()
+    combined = f"{value} {message} {result_details}"
     if "duplicate" in combined:
         return "duplicate"
     if "refund" in combined:
@@ -554,6 +550,16 @@ async def investigate_completed_run(
             .order_by(ReconciliationException.amount.desc(), ReconciliationException.id)
         )
     ).scalars().all()
+    result_rows = (
+        await session.execute(
+            select(ReconciliationResult).where(ReconciliationResult.run_id == run_id)
+        )
+    ).scalars().all()
+    results_by_id = {row.id: row for row in result_rows}
+    for exception in rows:
+        result = results_by_id.get(getattr(exception, "result_id", None))
+        if result is not None:
+            exception._ai_result = result
     investigations = [
         await investigate_exception(session, exception.id, provider=provider)
         for exception in select_exception_portfolio(rows)

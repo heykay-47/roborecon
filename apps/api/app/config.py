@@ -29,6 +29,7 @@ class Settings(BaseSettings):
     ai_timeout_seconds: float = Field(default=10.0, gt=0, le=60.0)
     ai_max_tool_rounds: int = Field(default=4, ge=1, le=4)
     ai_max_source_ids: int = Field(default=10, ge=1, le=10)
+    ai_max_tool_rows: int = Field(default=100, ge=1, le=1000)
     anthropic_api_key: str | None = None
     cors_origins: str = "http://localhost:5173"
 

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from types import SimpleNamespace
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import UUID, uuid4
 
 import httpx
@@ -20,8 +20,15 @@ from app.ai.model import (
     ToolRequest,
 )
 from app.ai.provider import GeminiProvider, ProviderError
-from app.ai.tools import CrossBatchSourceError, ToolExecutor
+from app.ai.tools import (
+    CrossBatchSourceError,
+    ToolExecutor,
+    ToolInputError,
+    ToolOutputLimitError,
+)
 from app.common.enums import ExceptionStatus, RunStatus
+from app.config import settings as app_settings
+from app.reconciliation import service as reconciliation_service
 
 EXCEPTION_ID = UUID("c3ff0d98-5ed8-5e1a-bf69-5a43a90dcbbb")
 BATCH_ID = UUID("4c4f7f9d-82de-4673-8a5d-a8dbf9e61a11")
@@ -45,6 +52,35 @@ class _Result:
 
     def all(self):
         return self.rows
+
+
+class _ClosingScalarResult:
+    def __init__(self, rows=None):
+        self.rows = list(rows or [])
+        self.closed = False
+
+    def scalars(self):
+        return self
+
+    def first(self):
+        self.closed = True
+        return self.rows[0] if self.rows else None
+
+    def all(self):
+        if self.closed:
+            raise AssertionError("ScalarResult was consumed before all rows were read")
+        self.closed = True
+        return self.rows
+
+
+class _SourceLookupSession:
+    def __init__(self, row):
+        self.row = row
+        self.calls = 0
+
+    async def execute(self, _statement):
+        self.calls += 1
+        return _ClosingScalarResult([self.row] if self.calls == 2 else [])
 
 
 class _Session:
@@ -276,7 +312,7 @@ async def test_invalid_provider_citation_falls_back():
     provider = _FakeProvider(
         ProviderRecommendation(
             recommendation="Use an unrelated record.",
-            citations=[Citation(source_type="ledger", source_id=uuid4())],
+            citations=[Citation(source_type="settlement", source_id=SOURCE_ID)],
         )
     )
 
@@ -284,6 +320,199 @@ async def test_invalid_provider_citation_falls_back():
 
     assert result.mode == "deterministicFallback"
     assert result.error_code == "invalid_citation"
+
+
+@pytest.mark.asyncio
+async def test_source_lookup_materializes_each_result_before_trying_next_model():
+    row = SimpleNamespace(
+        id=SOURCE_ID,
+        batch_id=BATCH_ID,
+        provider_order_id="order-1",
+        receipt="receipt-1",
+        amount=1_000,
+        currency="INR",
+        status="created",
+        business_at="2026-08-25T00:00:00+00:00",
+    )
+    context = InvestigationContext(
+        exception_id=EXCEPTION_ID,
+        batch_id=BATCH_ID,
+        run_id=RUN_ID,
+        exception_type="duplicate",
+        allowed_source_ids=[SOURCE_ID],
+    )
+    session = _SourceLookupSession(row)
+
+    result = await ToolExecutor(session, context).get_source_records(
+        {"source_ids": [str(SOURCE_ID)]}
+    )
+
+    assert result["records"][0]["sourceType"] == "razorpay_order"
+    assert session.calls == 2
+
+
+@pytest.mark.asyncio
+async def test_settlement_breakdown_normalizes_negative_debits():
+    settlement_id = uuid4()
+    settlement = SimpleNamespace(id=settlement_id, batch_id=BATCH_ID, amount=850)
+
+    def line(line_type, amount):
+        return SimpleNamespace(
+            id=uuid4(),
+            line_type=SimpleNamespace(value=line_type),
+            amount=amount,
+        )
+
+    lines = [
+        line("payment", 1_000),
+        line("refund", -100),
+        line("fee", -50),
+        line("tax", -10),
+        line("hold", -20),
+        line("release", 30),
+    ]
+    session = SimpleNamespace(
+        execute=AsyncMock(
+            side_effect=[_Result([settlement]), _Result(lines), _Result([])]
+        )
+    )
+    context = InvestigationContext(
+        exception_id=EXCEPTION_ID,
+        batch_id=BATCH_ID,
+        run_id=RUN_ID,
+        exception_type="amount_mismatch",
+        allowed_source_ids=[settlement_id],
+    )
+
+    result = await ToolExecutor(session, context).get_settlement_breakdown(
+        {"source_ids": [str(settlement_id)]}
+    )
+
+    assert result["refunds"] == 100
+    assert result["fees"] == 50
+    assert result["tax"] == 10
+    assert result["held"] == 20
+    assert result["expectedNet"] == 850
+    assert result["difference"] == 0
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("scope_field", ["batch_id", "run_id"])
+async def test_exception_evidence_rejects_result_outside_scope(scope_field):
+    session, exception, _, result = _session()
+    setattr(result, scope_field, uuid4())
+    context = InvestigationContext(
+        exception_id=exception.id,
+        batch_id=BATCH_ID,
+        run_id=RUN_ID,
+        exception_type=exception.exception_type,
+    )
+
+    with pytest.raises(ToolInputError, match="result is outside"):
+        await ToolExecutor(session, context).get_exception_evidence()
+
+
+@pytest.mark.asyncio
+async def test_settlement_breakdown_rejects_oversized_output():
+    settlement_id = uuid4()
+    settlement = SimpleNamespace(id=settlement_id, batch_id=BATCH_ID, amount=100)
+    lines = [
+        SimpleNamespace(
+            id=uuid4(),
+            line_type=SimpleNamespace(value="payment"),
+            amount=50,
+        ),
+        SimpleNamespace(
+            id=uuid4(),
+            line_type=SimpleNamespace(value="payment"),
+            amount=50,
+        ),
+    ]
+    session = SimpleNamespace(
+        execute=AsyncMock(
+            side_effect=[_Result([settlement]), _Result(lines), _Result([])]
+        )
+    )
+    context = InvestigationContext(
+        exception_id=EXCEPTION_ID,
+        batch_id=BATCH_ID,
+        run_id=RUN_ID,
+        exception_type="amount_mismatch",
+        allowed_source_ids=[settlement_id],
+    )
+
+    with pytest.raises(ToolOutputLimitError):
+        await ToolExecutor(session, context, max_tool_rows=1).get_settlement_breakdown(
+            {"source_ids": [str(settlement_id)]}
+        )
+
+
+@pytest.mark.asyncio
+async def test_tool_executor_uses_configured_source_id_cap(monkeypatch):
+    monkeypatch.setattr(app_settings, "ai_max_source_ids", 1)
+    context = InvestigationContext(
+        exception_id=EXCEPTION_ID,
+        batch_id=BATCH_ID,
+        run_id=RUN_ID,
+        exception_type="duplicate",
+        allowed_source_ids=[SOURCE_ID, uuid4()],
+    )
+
+    with pytest.raises(ToolInputError, match="at most 1"):
+        await ToolExecutor(_Session(*_session()[1:]), context).get_source_records(
+            {"source_ids": [str(item) for item in context.allowed_source_ids]}
+        )
+
+
+@pytest.mark.asyncio
+async def test_investigator_uses_configured_tool_round_cap(monkeypatch):
+    monkeypatch.setattr(app_settings, "ai_max_tool_rounds", 1)
+    session, exception, _, _ = _session()
+    provider = _FakeProvider(
+        responses=[
+            {"tool": "get_exception_evidence", "arguments": {}},
+            ProviderRecommendation(
+                recommendation="Use the deterministic evidence.",
+                citations=[Citation(source_type="ledger", source_id=SOURCE_ID)],
+            ),
+        ]
+    )
+    tools = _FakeTools()
+
+    result = await investigate_exception(session, exception.id, provider=provider, tools=tools)
+
+    assert result.error_code == "tool_round_limit"
+    assert len(tools.executed_tools) == 1
+
+
+class _AsyncSessionContext:
+    def __init__(self, session):
+        self.session = session
+
+    async def __aenter__(self):
+        return self.session
+
+    async def __aexit__(self, *_args):
+        return False
+
+
+@pytest.mark.asyncio
+async def test_post_commit_investigation_uses_isolated_session_and_rolls_back(monkeypatch):
+    isolated_session = AsyncMock()
+    factory = MagicMock(return_value=_AsyncSessionContext(isolated_session))
+    investigate = AsyncMock(side_effect=RuntimeError("AI persistence failed"))
+    monkeypatch.setattr(reconciliation_service, "async_session", factory, raising=False)
+    monkeypatch.setattr(investigator_module, "investigate_completed_run", investigate)
+    main_session = MagicMock()
+
+    await reconciliation_service._investigate_after_commit(
+        main_session, SimpleNamespace(id=RUN_ID)
+    )
+
+    factory.assert_called_once_with()
+    investigate.assert_awaited_once_with(isolated_session, RUN_ID)
+    isolated_session.rollback.assert_awaited_once()
+    main_session.rollback.assert_not_called()
 
 
 @pytest.mark.asyncio
@@ -340,6 +569,22 @@ def test_selector_returns_one_highest_value_exception_per_risk_class():
     }
     duplicate = next(row for row in selected if row.exception_type == "duplicate")
     assert duplicate.amount == 8_000
+
+
+def test_selector_reads_hold_release_evidence_from_result():
+    exception = SimpleNamespace(
+        id=uuid4(),
+        exception_type="amount_mismatch",
+        amount=6_000,
+        _ai_result=SimpleNamespace(
+            evidence=[],
+            candidates=[{"contradictions": ["hold_release_missing"]}],
+        ),
+    )
+
+    selected = select_exception_portfolio([exception])
+
+    assert selected == [exception]
 
 
 @pytest.mark.asyncio

@@ -4,7 +4,7 @@ from uuid import uuid4
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.audit.model import AuditEvent
+from app.audit import service as audit_service
 from app.batch.model import Batch
 from app.batch.schema import BatchResponse
 from app.common.enums import AuditEventType, BatchKind, BatchStatus
@@ -52,17 +52,14 @@ async def sync_snapshot(
     async with session.begin():
         session.add(batch)
         await session.flush()
-        session.add(
-            AuditEvent(
-                batch_id=batch.id,
-                event_type=AuditEventType.razorpay_sync_started,
-                sequence=1,
-                actor="razorpay",
-                entity_type="batch",
-                entity_id=batch.id,
-                occurred_at=started_at,
-                summary="Razorpay test-mode sync started",
-            )
+        await audit_service.append_event(
+            session,
+            batch_id=batch.id,
+            event_type=AuditEventType.razorpay_sync_started,
+            actor="razorpay",
+            entity_type="batch",
+            entity_id=batch.id,
+            summary="Razorpay test-mode sync started",
         )
 
     async def mark_failed() -> None:
@@ -70,17 +67,14 @@ async def sync_snapshot(
         batch.status = BatchStatus.failed
         batch.completed_at = failed_at
         async with session.begin():
-            session.add(
-                AuditEvent(
-                    batch_id=batch.id,
-                    event_type=AuditEventType.razorpay_sync_failed,
-                    sequence=2,
-                    actor="razorpay",
-                    entity_type="batch",
-                    entity_id=batch.id,
-                    occurred_at=failed_at,
-                    summary="Razorpay test-mode sync failed",
-                )
+            await audit_service.append_event(
+                session,
+                batch_id=batch.id,
+                event_type=AuditEventType.razorpay_sync_failed,
+                actor="razorpay",
+                entity_type="batch",
+                entity_id=batch.id,
+                summary="Razorpay test-mode sync failed",
             )
 
     try:
@@ -100,17 +94,14 @@ async def sync_snapshot(
             batch.status = BatchStatus.completed
             batch.source_row_count = counts["total"]
             batch.completed_at = completed_at
-            session.add(
-                AuditEvent(
-                    batch_id=batch.id,
-                    event_type=AuditEventType.razorpay_sync_completed,
-                    sequence=2,
-                    actor="razorpay",
-                    entity_type="batch",
-                    entity_id=batch.id,
-                    occurred_at=completed_at,
-                    summary="Razorpay test-mode sync completed",
-                )
+            await audit_service.append_event(
+                session,
+                batch_id=batch.id,
+                event_type=AuditEventType.razorpay_sync_completed,
+                actor="razorpay",
+                entity_type="batch",
+                entity_id=batch.id,
+                summary="Razorpay test-mode sync completed",
             )
     except Exception as exc:
         await mark_failed()
