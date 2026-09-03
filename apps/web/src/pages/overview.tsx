@@ -10,8 +10,10 @@ import {
 } from "recharts";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Alert } from "@/components/alert";
 import { MetricCard } from "@/components/metric-card";
 import { PageState, RetryButton } from "@/components/page-state";
+import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import {
   useOverview,
@@ -120,23 +122,21 @@ export function OverviewPage() {
 
   if (!metrics) {
     return (
-      <div className="space-y-8">
-        <div className="flex flex-col justify-between gap-4 border-b border-border pb-6 sm:flex-row sm:items-end">
-          <div>
-            <h1 className="text-3xl font-semibold tracking-tight">Overview</h1>
-             <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-               See the latest results, evidence, and items that need review.
-            </p>
-          </div>
-          <OverviewActions
+      <div className="page-stack">
+        <PageHeader
+          title="Overview"
+          description="See the latest results, evidence, and items that need review."
+          actions={
+            <OverviewActions
             batchId={activeBatch?.batchId}
             batchStatus={activeBatch?.status}
             onReset={reset}
             onRun={run}
             isResetting={resetMutation.isPending}
             isRunning={runMutation.isPending}
-          />
-        </div>
+            />
+          }
+        />
         <PageState
           kind="empty"
            title="No completed run yet"
@@ -146,16 +146,8 @@ export function OverviewPage() {
                : "Reset the demo data, then run reconciliation to see the results."
           }
         />
-        {resetMutation.isError && (
-           <p className="text-sm text-danger" role="alert">
-             Could not reset demo data: {resetMutation.error.message}
-          </p>
-        )}
-        {runMutation.isError && (
-           <p className="text-sm text-danger" role="alert">
-              Could not run reconciliation: {runMutation.error.message}
-          </p>
-        )}
+        {resetMutation.isError && <Alert tone="danger">Could not reset demo data: {resetMutation.error.message}</Alert>}
+        {runMutation.isError && <Alert tone="danger">Could not run reconciliation: {runMutation.error.message}</Alert>}
       </div>
     );
   }
@@ -163,15 +155,11 @@ export function OverviewPage() {
   const scenarios = Object.values(metrics.perClass ?? {});
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col justify-between gap-4 border-b border-border pb-6 xl:flex-row xl:items-end">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Overview</h1>
-           <p className="mt-2 max-w-2xl text-sm text-muted-foreground">
-             See the latest results, evidence, and items that need review.
-          </p>
-        </div>
-        <div className="flex flex-wrap items-center gap-3">
+    <div className="page-stack">
+      <PageHeader
+        title="Overview"
+        description="See the latest results, evidence, and items that need review."
+        status={
           <Badge
             variant="outline"
             className={
@@ -180,38 +168,34 @@ export function OverviewPage() {
                  : "border-warning/30 bg-warning/10 text-warning"
             }
           >
-             {metrics.benchmarkAvailable ? "Seeded benchmark available" : "Benchmark unavailable"}
+            {metrics.benchmarkAvailable ? "Seeded benchmark available" : "Benchmark unavailable"}
           </Badge>
-          {activeBatch && <StatusBadge value={activeBatch.status} />}
-          <OverviewActions
+        }
+        actions={
+          <>
+            {activeBatch && <StatusBadge value={activeBatch.status} />}
+            <OverviewActions
             batchId={activeBatch?.batchId}
             batchStatus={activeBatch?.status}
             onReset={reset}
             onRun={run}
             isResetting={resetMutation.isPending}
             isRunning={runMutation.isPending}
-          />
-        </div>
-      </div>
+            />
+          </>
+        }
+      />
 
-      {resetMutation.isError && (
-         <p className="text-sm text-danger" role="alert">
-           Could not reset demo data: {resetMutation.error.message}
-        </p>
+      {resetMutation.isError && <Alert tone="danger">Could not reset demo data: {resetMutation.error.message}</Alert>}
+      {runMutation.isError && <Alert tone="danger">Could not run reconciliation: {runMutation.error.message}</Alert>}
+
+      {metrics.benchmarkAvailable && (
+        <Alert tone="warning">
+            These scores measure the fixed synthetic demo dataset. They are not production accuracy estimates or guarantees.
+        </Alert>
       )}
-      {runMutation.isError && (
-         <p className="text-sm text-danger" role="alert">
-            Could not run reconciliation: {runMutation.error.message}
-        </p>
-      )}
 
-       {metrics.benchmarkAvailable && (
-         <p className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
-           These scores measure the fixed synthetic demo dataset. They are not production accuracy estimates or guarantees.
-         </p>
-       )}
-
-        <section className="grid overflow-hidden rounded-xl border border-border bg-card sm:grid-cols-2 xl:grid-cols-5" aria-label="Run summary">
+      <section className="panel grid sm:grid-cols-2 xl:grid-cols-5" aria-label="Run summary">
         <MetricCard
           label="Benchmark match rate"
           value={formatPercent(metrics.matchRate)}
@@ -243,12 +227,12 @@ export function OverviewPage() {
       </section>
 
       <section className="grid gap-4 lg:grid-cols-[1.35fr_0.65fr]">
-        <div className="rounded-xl border border-border bg-card p-5">
+        <div className="panel p-4 sm:p-5">
           <div className="flex flex-col justify-between gap-2 sm:flex-row sm:items-start">
             <div>
-                <h2 className="text-base font-semibold">Seeded benchmark by case type</h2>
+                <h2 className="text-base font-semibold">{metrics.benchmarkAvailable ? "Seeded benchmark by case type" : "Results by case type"}</h2>
                <p className="mt-1 text-sm text-muted-foreground">
-                  Scores against hidden truth in the fixed synthetic dataset.
+                  {metrics.benchmarkAvailable ? "Scores against hidden truth in the fixed synthetic dataset." : "Operational outcomes from this Reconciliation Run."}
               </p>
             </div>
             {metrics.runId && (
@@ -258,13 +242,13 @@ export function OverviewPage() {
             )}
           </div>
           {scenarios.length === 0 ? (
-            <div className="mt-6 rounded-lg border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
+            <div className="mt-6 rounded-md border border-dashed border-border px-4 py-8 text-center text-sm text-muted-foreground">
                No case-type results are available for this run.
             </div>
           ) : (
             <div className="mt-6 h-64 w-full">
               {typeof ResizeObserver === "undefined" ? (
-                <div className="flex h-full items-center justify-center rounded-lg border border-dashed border-border text-sm text-muted-foreground">
+                <div className="flex h-full items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
                    The chart is not available in this browser.
                 </div>
               ) : (
@@ -304,7 +288,7 @@ export function OverviewPage() {
           )}
         </div>
 
-        <div className="rounded-xl border border-border bg-card p-5">
+        <div className="panel p-4 sm:p-5">
           <h2 className="text-base font-semibold">Money summary</h2>
           <p className="mt-1 text-sm text-muted-foreground">Amounts are shown in INR.</p>
           <dl className="mt-6 divide-y divide-border">
@@ -328,16 +312,16 @@ export function OverviewPage() {
         </div>
       </section>
 
-      <section className="grid gap-4 border-t border-border pt-6 sm:grid-cols-2">
-        <div>
-          <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Current batch</p>
+      <section className="grid gap-4 sm:grid-cols-2">
+        <div className="panel p-4">
+          <p className="eyebrow">Current batch</p>
           <p className="mt-2 font-mono text-sm text-foreground">{activeBatch?.batchId ?? "No batch"}</p>
           <p className="mt-1 text-sm text-muted-foreground">
             {activeBatch?.seed ?? "No demo batch yet"} · {formatDateTime(activeBatch?.completedAt)}
           </p>
         </div>
-        <div>
-           <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Run ID</p>
+        <div className="panel p-4">
+          <p className="eyebrow">Run ID</p>
           <p className="mt-2 font-mono text-sm text-foreground">{metrics.runId}</p>
           <p className="mt-1 text-sm text-muted-foreground">
              Report version {metrics.reportVersion} · {metrics.acceptancePassed ? "checks passed" : "checks not met"}

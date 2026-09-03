@@ -119,7 +119,7 @@ describe("TransactionsPage", () => {
 
     renderWithProviders(<TransactionsPage />, { route: "/transactions?source=settlement_line&sourceId=line-001" });
 
-    await screen.findByRole("heading", { name: "Transactions" });
+    await screen.findByRole("heading", { name: "Source records" });
     expect(fetchSpy.mock.calls.map(([input]) => String(input)).some((url) =>
       url.includes("source_type=settlement_line") && url.includes("source_id=line-001"),
     )).toBe(true);

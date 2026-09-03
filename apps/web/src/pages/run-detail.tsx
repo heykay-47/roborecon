@@ -1,9 +1,12 @@
 import { useEffect } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
-import { ArrowLeft, Check, X } from "lucide-react";
+import { IconArrowLeft, IconCheck, IconX } from "@tabler/icons-react";
+import { Alert } from "@/components/alert";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/page-header";
 import { StatusBadge } from "@/components/status-badge";
 import { PageState, RetryButton } from "@/components/page-state";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useRun } from "@/hooks/use-roborecon";
 import { formatDateTime, formatDuration, formatInr, formatInteger, formatPercent } from "@/lib/format";
 import { humanizeStatus } from "@/lib/status-colors";
@@ -40,40 +43,40 @@ export function RunDetailPage() {
       : "Seeded benchmark not met";
 
   return (
-    <div className="space-y-8">
-      <div className="flex flex-col gap-4 border-b border-border pb-6 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <Link to="/runs" className="mb-4 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="size-4" aria-hidden="true" /> Back to runs
+    <div className="page-stack">
+      <PageHeader
+        title={`Run ${run.runId}`}
+        backLink={
+          <Link to="/runs" className="mb-3 inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+            <IconArrowLeft className="size-4" aria-hidden="true" /> Back to runs
           </Link>
-          <div className="flex flex-wrap items-center gap-3">
-            <h1 className="text-3xl font-semibold tracking-tight">Run {run.runId}</h1>
-            <StatusBadge value={run.status} />
-          </div>
-          <p className="mt-2 font-mono text-xs text-muted-foreground">Batch {run.batchId} · {formatDateTime(run.completedAt)}</p>
-        </div>
-        {metrics && (
-             <div className={`text-sm font-medium ${metrics.acceptancePassed ? "text-success" : "text-warning"}`}>
-            {benchmarkStatus}
-          </div>
-        )}
-      </div>
+        }
+        status={<StatusBadge value={run.status} />}
+        description={<span className="font-mono text-xs">Batch {run.batchId} · {formatDateTime(run.completedAt)}</span>}
+        actions={
+          metrics && (
+            <div className={`text-sm font-medium ${metrics.acceptancePassed ? "text-success" : "text-warning"}`}>
+              {benchmarkStatus}
+            </div>
+          )
+        }
+      />
 
       <section className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4" aria-label="Run summary">
-        <div className="rounded-lg border border-border bg-card p-4">
-          <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Records checked</p>
+        <div className="panel p-4">
+          <p className="eyebrow">Records checked</p>
           <p className="mt-2 font-mono text-xl tabular-nums">{formatInteger(run.sourceRowCount)}</p>
         </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Throughput</p>
+        <div className="panel p-4">
+          <p className="eyebrow">Throughput</p>
           <p className="mt-2 font-mono text-xl tabular-nums">{run.throughput == null ? "Not available" : `${run.throughput.toFixed(2)} records/s`}</p>
         </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Duration</p>
+        <div className="panel p-4">
+          <p className="eyebrow">Duration</p>
           <p className="mt-2 font-mono text-xl tabular-nums">{formatDuration(run.durationMs)}</p>
         </div>
-        <div className="rounded-lg border border-border bg-card p-4">
-          <p className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Saved results</p>
+        <div className="panel p-4">
+          <p className="eyebrow">Saved results</p>
           <p className="mt-2 font-mono text-xl tabular-nums">{formatInteger(run.results.length)}</p>
         </div>
       </section>
@@ -83,12 +86,12 @@ export function RunDetailPage() {
       ) : (
         <>
           {metrics.benchmarkAvailable && (
-            <p className="rounded-lg border border-warning/30 bg-warning/10 px-4 py-3 text-sm text-foreground">
-              These scores measure the fixed synthetic demo dataset. They are not production accuracy estimates or guarantees.
-            </p>
+            <Alert tone="warning">
+               These scores measure the fixed synthetic demo dataset. They are not production accuracy estimates or guarantees.
+            </Alert>
           )}
-          <Card>
-            <CardHeader>
+          <Card className="gap-0 py-0">
+            <CardHeader className="panel-header">
               <CardTitle>{metrics.benchmarkAvailable ? "Seeded benchmark checks" : "Run checks"}</CardTitle>
             </CardHeader>
             <CardContent>
@@ -97,7 +100,7 @@ export function RunDetailPage() {
                   <div key={name} className="flex items-center justify-between gap-4 border-b border-border pb-3">
                     <span className="text-sm text-muted-foreground">{humanizeStatus(name)}</span>
                      <span className={passed ? "inline-flex items-center gap-1 text-sm text-success" : "inline-flex items-center gap-1 text-sm text-danger"}>
-                      {passed ? <Check className="size-4" aria-hidden="true" /> : <X className="size-4" aria-hidden="true" />}
+                      {passed ? <IconCheck className="size-4" aria-hidden="true" /> : <IconX className="size-4" aria-hidden="true" />}
                       {passed ? "Passed" : "Failed"}
                     </span>
                   </div>
@@ -108,43 +111,41 @@ export function RunDetailPage() {
 
           <section className="grid gap-4 lg:grid-cols-[1.4fr_0.6fr]">
             <Card>
-              <CardHeader>
+              <CardHeader className="border-b border-border">
                 <CardTitle>{metrics.benchmarkAvailable ? "Seeded benchmark by case type" : "Results by case type"}</CardTitle>
               </CardHeader>
               <CardContent>
                 {classes.length === 0 ? (
                   <p className="text-sm text-muted-foreground">Per-class metrics are not available.</p>
                 ) : (
-                  <div className="overflow-x-auto">
-                    <table className="w-full min-w-[620px] text-sm">
-                      <thead className="border-b border-border text-left text-xs uppercase tracking-[0.12em] text-muted-foreground">
-                        <tr>
-                          <th className="px-2 py-3 font-medium">Case type</th>
-                          <th className="px-2 py-3 text-right font-medium">Cases</th>
-                          <th className="px-2 py-3 text-right font-medium">Matched</th>
-                          <th className="px-2 py-3 text-right font-medium">Match rate</th>
-                          <th className="px-2 py-3 text-right font-medium">Precision</th>
-                        </tr>
-                      </thead>
-                      <tbody>
+                  <Table className="min-w-[620px]">
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Case type</TableHead>
+                        <TableHead className="text-right">Cases</TableHead>
+                        <TableHead className="text-right">Matched</TableHead>
+                        <TableHead className="text-right">Match rate</TableHead>
+                        <TableHead className="text-right">Precision</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
                         {classes.map((metric) => (
-                          <tr key={metric.scenarioClass} className="border-b border-border last:border-0">
-                            <td className="px-2 py-3 font-medium text-foreground">{humanizeStatus(metric.scenarioClass)}</td>
-                            <td className="px-2 py-3 text-right font-mono tabular-nums">{formatInteger(metric.cases)}</td>
-                            <td className="px-2 py-3 text-right font-mono tabular-nums">{formatInteger(metric.correctlyResolved)}</td>
-                             <td className="px-2 py-3 text-right font-mono tabular-nums text-primary">{formatPercent(metric.matchRate)}</td>
-                             <td className="px-2 py-3 text-right font-mono tabular-nums text-success">{formatPercent(metric.precision)}</td>
-                          </tr>
+                          <TableRow key={metric.scenarioClass}>
+                            <TableCell className="font-medium text-foreground">{humanizeStatus(metric.scenarioClass)}</TableCell>
+                            <TableCell className="text-right font-mono tabular-nums">{formatInteger(metric.cases)}</TableCell>
+                            <TableCell className="text-right font-mono tabular-nums">{formatInteger(metric.correctlyResolved)}</TableCell>
+                             <TableCell className="text-right font-mono tabular-nums text-primary">{formatPercent(metric.matchRate)}</TableCell>
+                             <TableCell className="text-right font-mono tabular-nums text-success">{formatPercent(metric.precision)}</TableCell>
+                          </TableRow>
                         ))}
-                      </tbody>
-                    </table>
-                  </div>
+                    </TableBody>
+                  </Table>
                 )}
               </CardContent>
             </Card>
 
             <Card>
-              <CardHeader>
+              <CardHeader className="border-b border-border">
                 <CardTitle>Money and review</CardTitle>
               </CardHeader>
               <CardContent>
@@ -162,7 +163,7 @@ export function RunDetailPage() {
 
       <section aria-label="Persisted results">
         <Card>
-          <CardHeader>
+          <CardHeader className="border-b border-border">
             <CardTitle>Saved results</CardTitle>
           </CardHeader>
           <CardContent>
@@ -174,7 +175,7 @@ export function RunDetailPage() {
                   <article
                     key={result.resultId}
                     id={`result-${result.resultId}`}
-                    className="flex scroll-mt-24 flex-col justify-between gap-3 rounded-lg border border-border bg-background/40 p-4 sm:flex-row sm:items-center"
+                    className="flex scroll-mt-24 flex-col justify-between gap-3 rounded-md border border-border bg-muted/20 p-4 sm:flex-row sm:items-center"
                   >
                     <div>
                        <p className="font-mono text-sm text-primary">{result.resultId}</p>

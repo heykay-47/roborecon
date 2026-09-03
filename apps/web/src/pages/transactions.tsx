@@ -1,11 +1,12 @@
 import { useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import type { ColumnDef } from "@tanstack/react-table";
-import { ChevronLeft, ChevronRight } from "lucide-react";
 import { DataTable } from "@/components/data-table";
+import { Alert } from "@/components/alert";
 import { PageState, RetryButton } from "@/components/page-state";
+import { PageHeader } from "@/components/page-header";
+import { Pagination } from "@/components/pagination";
 import { StatusBadge } from "@/components/status-badge";
-import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
 import { useTransactions, type TransactionFilters } from "@/hooks/use-roborecon";
@@ -143,34 +144,35 @@ export function TransactionsPage() {
   }
 
   const displayData = data;
-  const totalPages = Math.max(1, Math.ceil(displayData.total / pageSize));
 
   return (
-    <div className="space-y-6">
-      <div className="flex flex-col justify-between gap-3 border-b border-border pb-6 sm:flex-row sm:items-end">
-        <div>
-          <h1 className="text-3xl font-semibold tracking-tight">Transactions</h1>
-          <p className="mt-2 max-w-2xl text-sm text-muted-foreground">All payment records in one place, with filters and links to evidence.</p>
-        </div>
-        <p className="font-mono text-xs text-muted-foreground">{formatInteger(displayData.total)} records</p>
-      </div>
+    <div className="page-stack">
+      <PageHeader
+        title="Source records"
+        description="All payment records in one place, with filters and links to evidence."
+        actions={<p className="font-mono text-xs text-muted-foreground">{formatInteger(displayData.total)} records</p>}
+      />
 
-       {citationSourceId && <p className="rounded-lg border border-primary/20 bg-primary/5 p-3 text-xs text-primary" role="status">Source record: <span className="font-mono">{citationSourceId}</span>. Showing it if it is in this batch.</p>}
+      {citationSourceId && (
+        <Alert>
+          Source record: <span className="font-mono">{citationSourceId}</span>. Showing it if it is in this batch.
+        </Alert>
+      )}
 
-      <section className="grid gap-3 rounded-xl border border-border bg-card p-4 sm:grid-cols-3" aria-label="Record filters">
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground" htmlFor="source-type">
+      <section className="filter-panel grid gap-3 sm:grid-cols-3" aria-label="Record filters">
+        <label className="field-label" htmlFor="source-type">
           Record type
           <Select id="source-type" value={filters.sourceType ?? ""} onChange={(event) => updateFilter("sourceType", event.target.value)}>
             {sourceTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </Select>
         </label>
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground" htmlFor="status">
+        <label className="field-label" htmlFor="status">
           Status
           <Select id="status" value={filters.status ?? ""} onChange={(event) => updateFilter("status", event.target.value)}>
             {statuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
           </Select>
         </label>
-        <label className="space-y-1.5 text-xs font-medium text-muted-foreground" htmlFor="reconciliation-state">
+        <label className="field-label" htmlFor="reconciliation-state">
           Match state
           <Select id="reconciliation-state" value={filters.reconciliationState ?? ""} onChange={(event) => updateFilter("reconciliationState", event.target.value)}>
             {reconciliationStates.map(([value, label]) => <option key={value} value={value}>{label}</option>)}
@@ -178,8 +180,8 @@ export function TransactionsPage() {
         </label>
       </section>
 
-      <Card>
-        <CardHeader className="flex-row items-center justify-between">
+      <Card className="gap-0 py-0">
+        <CardHeader className="panel-header">
           <CardTitle className="text-sm font-medium">Payment records</CardTitle>
           {transactions.isFetching && !transactions.isLoading && (
              <span role="status" aria-label="Updating records…" className="text-xs text-primary">
@@ -187,24 +189,14 @@ export function TransactionsPage() {
             </span>
           )}
         </CardHeader>
-        <CardContent>
+        <CardContent className="p-0">
           <DataTable
             data={displayData.items}
             columns={columns}
             getRowId={(row, index) => row.sourceId ?? `${row.sourceType}-${row.reference ?? "row"}-${index}`}
             emptyMessage={citationSourceId ? "This source record is not in the batch." : "No records match these filters."}
           />
-          <div className="mt-4 flex items-center justify-between border-t border-border pt-4">
-            <span className="text-xs text-muted-foreground">Page {page} of {totalPages} · {formatInteger(displayData.total)} records</span>
-            <div className="flex gap-2">
-              <Button variant="outline" size="sm" aria-label="Previous page" disabled={page === 1} onClick={() => setPage((current) => Math.max(1, current - 1))}>
-                <ChevronLeft aria-hidden="true" /> Previous
-              </Button>
-              <Button variant="outline" size="sm" aria-label="Next page" disabled={page >= totalPages} onClick={() => setPage((current) => Math.min(totalPages, current + 1))}>
-                Next <ChevronRight aria-hidden="true" />
-              </Button>
-            </div>
-          </div>
+          <Pagination page={page} total={displayData.total} pageSize={pageSize} noun="records" onPageChange={setPage} />
         </CardContent>
       </Card>
     </div>

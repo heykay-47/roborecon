@@ -1,4 +1,4 @@
-import { ExternalLink, Wrench } from "lucide-react";
+import { IconExternalLink, IconTool } from "@tabler/icons-react";
 import { Link } from "react-router-dom";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -24,7 +24,7 @@ export function RecordSummary({
   const fields = Object.entries(values).filter(([key]) => key !== "id" && key !== "sourceType");
 
   return (
-    <Card size="sm" className="h-full bg-background/40">
+    <Card size="sm" className="h-full bg-muted/20">
       <CardHeader className="border-b border-border/80">
         <CardTitle className="flex flex-wrap items-center justify-between gap-2 text-sm">
           <span>{title}</span>
@@ -58,7 +58,7 @@ export function RecordSummary({
 
 export function CandidateEvidence({ candidate }: { candidate: ScoredCandidate }) {
   return (
-    <div className="rounded-lg border border-border bg-background/30 p-3">
+    <div className="rounded-md border border-border bg-muted/20 p-3">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="text-sm font-medium text-foreground">Possible match</p>
@@ -91,7 +91,7 @@ export function CriterionEvidenceList({ evidence }: { evidence: CriterionEvidenc
   return (
     <div className="space-y-2">
       {evidence.map((item, index) => (
-        <div key={`${item.ruleCode}-${index}`} className="grid gap-2 rounded-lg border border-border bg-background/30 p-3 md:grid-cols-[9rem_5rem_1fr] md:items-start">
+        <div key={`${item.ruleCode}-${index}`} className="grid gap-2 rounded-md border border-border bg-muted/20 p-3 md:grid-cols-[9rem_5rem_1fr] md:items-start">
           <div>
              <p className="font-mono text-xs font-semibold text-primary">{item.ruleCode}</p>
             <p className="mt-1 text-xs text-muted-foreground">{humanizeStatus(item.result)}</p>
@@ -117,19 +117,19 @@ export function ScoreSummary({
 }: Pick<ScoredCandidate, "score"> & { runnerUpScore: number; margin: number; autonomous: boolean }) {
   return (
     <dl className="grid gap-3 sm:grid-cols-4">
-      <div className="rounded-lg border border-border bg-background/30 p-3">
+      <div className="rounded-md border border-border bg-muted/20 p-3">
         <dt className="text-xs text-muted-foreground">Best score</dt>
          <dd className="mt-1 font-mono text-xl font-semibold tabular-nums text-primary">{score}</dd>
       </div>
-      <div className="rounded-lg border border-border bg-background/30 p-3">
+      <div className="rounded-md border border-border bg-muted/20 p-3">
         <dt className="text-xs text-muted-foreground">Second-best score</dt>
         <dd className="mt-1 font-mono text-xl font-semibold tabular-nums">{runnerUpScore}</dd>
       </div>
-      <div className="rounded-lg border border-border bg-background/30 p-3">
+      <div className="rounded-md border border-border bg-muted/20 p-3">
         <dt className="text-xs text-muted-foreground">Score gap</dt>
         <dd className="mt-1 font-mono text-xl font-semibold tabular-nums">{margin}</dd>
       </div>
-      <div className="rounded-lg border border-border bg-background/30 p-3">
+      <div className="rounded-md border border-border bg-muted/20 p-3">
         <dt className="text-xs text-muted-foreground">Match decision</dt>
          <dd className={autonomous ? "mt-1 text-sm font-medium text-success" : "mt-1 text-sm font-medium text-warning"}>
           {autonomous ? "Automatic" : "Needs review"}
@@ -141,7 +141,7 @@ export function ScoreSummary({
 
 export function InvestigationTrace({ investigation }: { investigation: AIInvestigation }) {
   return (
-    <div className="rounded-lg border border-border bg-background/30 p-4">
+    <div className="rounded-md border border-border bg-muted/20 p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div>
           <div className="flex flex-wrap items-center gap-2">
@@ -184,10 +184,10 @@ export function CitationList({ citations }: { citations: CopilotCitation[] | Rec
           <Link
             key={`${sourceType}-${sourceId}`}
             to={citationHref(sourceType, sourceId)}
-             className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-primary/30 bg-primary/5 px-2.5 text-xs text-primary hover:bg-primary/10"
+             className="inline-flex min-h-8 items-center gap-1.5 rounded-md border border-primary/30 bg-primary/8 px-2.5 text-xs text-primary hover:bg-primary/12"
           >
             {humanizeStatus(sourceType)} {sourceId}
-            <ExternalLink className="size-3" aria-hidden="true" />
+            <IconExternalLink className="size-3" aria-hidden="true" />
           </Link>
         ))}
       </div>
@@ -199,9 +199,9 @@ export function ToolTrace({ trace }: { trace: Record<string, unknown>[] }) {
   if (trace.length === 0) return null;
 
   return (
-    <details className="mt-4 rounded-md border border-border/80 bg-background/30 px-3 py-2">
+    <details className="mt-4 rounded-md border border-border/80 bg-muted/20 px-3 py-2">
       <summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-medium text-muted-foreground">
-        <Wrench className="size-3.5" aria-hidden="true" /> Tool details ({trace.length})
+        <IconTool className="size-3.5" aria-hidden="true" /> Tool details ({trace.length})
       </summary>
       <div className="mt-3 space-y-2">
         {trace.map((item, index) => (

@@ -1,17 +1,16 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, type ComponentType } from "react";
 import { NavLink, Outlet, useLocation } from "react-router-dom";
 import {
-  BarChart3,
-  Bot,
-  ClipboardList,
-  FileSearch,
-  Menu,
-  Settings,
-  ScrollText,
-  Table2,
-  X,
-  type LucideIcon,
-} from "lucide-react";
+  IconChartBar,
+  IconClipboardList,
+  IconFileSearch,
+  IconMenu2,
+  IconRobot,
+  IconSettings,
+  IconTable,
+  IconTimeline,
+  IconX,
+} from "@tabler/icons-react";
 import { cn } from "@/lib/utils";
 import { useTheme } from "@/hooks/use-theme";
 import { ThemeToggle } from "@/components/theme-toggle";
@@ -19,22 +18,22 @@ import { ThemeToggle } from "@/components/theme-toggle";
 interface NavigationItem {
   to: string;
   label: string;
-  icon: LucideIcon;
+  icon: ComponentType<{ className?: string; "aria-hidden"?: boolean | "true" | "false" }>;
 }
 
 const navigationItems: NavigationItem[] = [
-  { to: "/", label: "Overview", icon: BarChart3 },
-  { to: "/runs", label: "Runs", icon: ClipboardList },
-  { to: "/transactions", label: "Transactions", icon: Table2 },
-  { to: "/exceptions", label: "Exceptions", icon: FileSearch },
-  { to: "/audit", label: "Audit", icon: ScrollText },
-  { to: "/copilot", label: "Copilot", icon: Bot },
-  { to: "/settings", label: "Settings", icon: Settings },
+  { to: "/", label: "Overview", icon: IconChartBar },
+  { to: "/runs", label: "Runs", icon: IconClipboardList },
+  { to: "/transactions", label: "Source records", icon: IconTable },
+  { to: "/exceptions", label: "Exceptions", icon: IconFileSearch },
+  { to: "/audit", label: "Audit", icon: IconTimeline },
+  { to: "/copilot", label: "Copilot", icon: IconRobot },
+  { to: "/settings", label: "Settings", icon: IconSettings },
 ];
 
 function NavigationLinks({ onNavigate }: { onNavigate: () => void }) {
   return (
-    <nav aria-label="Primary navigation" className="space-y-1">
+    <nav aria-label="Primary navigation" className="space-y-0.5">
       {navigationItems.map(({ to, label, icon: Icon }) => (
         <NavLink
           key={to}
@@ -43,14 +42,14 @@ function NavigationLinks({ onNavigate }: { onNavigate: () => void }) {
           onClick={onNavigate}
           className={({ isActive }) =>
             cn(
-              "group flex min-h-11 items-center gap-3 rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+              "group flex min-h-11 items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
               isActive
-                ? "bg-primary/10 text-primary ring-1 ring-primary/20"
-                : "text-muted-foreground hover:bg-foreground/5 hover:text-foreground",
+                ? "bg-sidebar-accent text-sidebar-accent-foreground ring-1 ring-sidebar-primary/25"
+                : "text-muted-foreground hover:bg-sidebar-accent/70 hover:text-sidebar-foreground",
             )
           }
         >
-          <Icon className="size-4 shrink-0" aria-hidden="true" />
+          <Icon className="size-[1.1rem] shrink-0" aria-hidden="true" />
           <span>{label}</span>
         </NavLink>
       ))}
@@ -132,20 +131,20 @@ export function Layout() {
         ref={sidebarRef}
         aria-label="Workspace navigation"
         className={cn(
-          "fixed inset-y-0 z-40 flex w-64 flex-col border-r border-border bg-sidebar px-4 py-5 transition-[left] lg:static lg:left-0",
+          "fixed inset-y-0 z-40 flex w-64 flex-col border-r border-sidebar-border bg-sidebar px-3 py-4 transition-[left] lg:static lg:left-0",
           mobileOpen ? "left-0" : "-left-64",
         )}
         aria-hidden={sidebarInert ? true : undefined}
         inert={sidebarInert ? true : undefined}
       >
-        <div className="flex items-center justify-between px-2">
+        <div className="flex items-center justify-between px-2 py-1">
           <div className="flex items-center gap-3">
-            <div className="flex size-8 items-center justify-center rounded-lg bg-primary text-xs font-black tracking-[-0.12em] text-primary-foreground">
+            <div className="flex size-9 items-center justify-center rounded-md bg-sidebar-primary text-xs font-black tracking-[-0.12em] text-sidebar-primary-foreground shadow-xs">
               RR
             </div>
             <div>
-              <p className="font-semibold tracking-tight text-foreground">Roborecon</p>
-              <p className="text-[0.65rem] uppercase tracking-[0.18em] text-muted-foreground">
+              <p className="font-semibold tracking-tight text-sidebar-foreground">Roborecon</p>
+              <p className="text-[0.65rem] uppercase tracking-[0.16em] text-muted-foreground">
                 Operations
               </p>
             </div>
@@ -153,23 +152,23 @@ export function Layout() {
           <button
             type="button"
             ref={closeRef}
-            className="flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/5 hover:text-foreground lg:hidden"
+             className="flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground lg:hidden"
             aria-label="Close navigation"
             onClick={() => setMobileOpen(false)}
           >
-            <X className="size-4" aria-hidden="true" />
+             <IconX className="size-4" aria-hidden="true" />
           </button>
         </div>
 
-        <div className="mt-10 px-2 text-[0.65rem] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
-          Menu
+        <div className="mt-9 px-3 text-[0.65rem] font-semibold uppercase tracking-[0.14em] text-muted-foreground">
+          Workspace
         </div>
-        <div className="mt-3">
+        <div className="mt-2">
           <NavigationLinks onNavigate={() => setMobileOpen(false)} />
         </div>
 
-        <div className="mt-auto border-t border-border px-2 pt-4">
-          <p className="text-xs font-medium text-foreground">Matching rules</p>
+        <div className="mt-auto border-t border-sidebar-border px-3 pt-4">
+          <p className="text-xs font-medium text-sidebar-foreground">Matching rules</p>
           <p className="mt-1 text-xs leading-5 text-muted-foreground">
             Rules decide matches. Review anything unclear.
           </p>
@@ -179,24 +178,24 @@ export function Layout() {
       {mobileOpen && (
         <button
           type="button"
-          className="fixed inset-0 z-30 bg-black/70 lg:hidden"
+         className="fixed inset-0 z-30 bg-slate-950/65 backdrop-blur-[1px] lg:hidden"
           aria-label="Dismiss navigation"
           onClick={() => setMobileOpen(false)}
         />
       )}
 
       <div className="min-w-0 flex-1">
-        <header className="sticky top-0 z-20 flex h-16 items-center justify-between border-b border-border bg-background/95 px-4 backdrop-blur-sm sm:px-6 lg:px-8">
+        <header className="sticky top-0 z-20 flex h-14 items-center justify-between border-b border-border bg-background/95 px-4 backdrop-blur-sm sm:px-6 lg:px-8">
           <div className="flex items-center gap-3">
             <button
               type="button"
               ref={toggleRef}
-              className="flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-foreground/5 hover:text-foreground lg:hidden"
+               className="flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground lg:hidden"
               aria-label="Toggle navigation"
               aria-expanded={mobileOpen}
               onClick={() => setMobileOpen((open) => !open)}
             >
-              <Menu className="size-5" aria-hidden="true" />
+               <IconMenu2 className="size-5" aria-hidden="true" />
             </button>
             <div>
               <p className="text-sm font-semibold text-foreground">
@@ -209,12 +208,12 @@ export function Layout() {
           </div>
           <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <ThemeToggle theme={theme} onToggle={toggleTheme} />
-            <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
-            Demo data
+             <span className="size-1.5 rounded-full bg-success" aria-hidden="true" />
+             <span className="hidden sm:inline">Demo data</span>
           </div>
         </header>
 
-        <main id="main-content" tabIndex={-1} className="mx-auto max-w-[1440px] px-4 py-6 outline-none sm:px-6 lg:px-8 lg:py-8">
+        <main id="main-content" tabIndex={-1} className="mx-auto w-full max-w-[1600px] px-4 py-6 outline-none sm:px-6 lg:px-8 lg:py-7">
           <Outlet />
         </main>
       </div>

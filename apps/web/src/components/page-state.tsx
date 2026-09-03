@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { AlertCircle, Database, LoaderCircle } from "lucide-react";
+import { IconAlertCircle, IconDatabase, IconLoader2 } from "@tabler/icons-react";
 import { Button } from "@/components/ui/button";
 
 interface PageStateProps {
@@ -11,12 +11,12 @@ interface PageStateProps {
 }
 
 export function PageState({ kind, title, description, action, headingLevel = "h2" }: PageStateProps) {
-  const Icon = kind === "loading" ? LoaderCircle : kind === "error" ? AlertCircle : Database;
+  const Icon = kind === "loading" ? IconLoader2 : kind === "error" ? IconAlertCircle : IconDatabase;
   const Heading = headingLevel;
 
   return (
     <div
-      className="flex min-h-56 flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-border bg-card/50 px-6 py-10 text-center"
+      className="flex min-h-56 flex-col items-center justify-center gap-3 rounded-md border border-dashed border-border bg-card px-6 py-10 text-center shadow-xs"
       role={kind === "loading" ? "status" : "alert"}
       aria-live="polite"
     >

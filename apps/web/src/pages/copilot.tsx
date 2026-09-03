@@ -1,6 +1,8 @@
 import { useState } from "react";
-import { CircleAlert, MessageSquare, Send } from "lucide-react";
+import { IconAlertCircle, IconMessageCircle, IconSend } from "@tabler/icons-react";
+import { Alert } from "@/components/alert";
 import { CitationList, ToolTrace } from "@/components/evidence";
+import { PageHeader } from "@/components/page-header";
 import { PageState } from "@/components/page-state";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,7 +31,7 @@ function Answer({ answer }: { answer: CopilotAnswer }) {
   const fallback = answer.mode === "deterministicFallback";
   return (
     <Card>
-      <CardHeader className="flex-row items-start justify-between gap-3"><div><CardTitle className="text-sm font-medium">Answer from saved data</CardTitle><p className="mt-1 text-xs text-muted-foreground">Uses saved settlement records</p></div><Badge variant="outline" className={fallback ? "text-warning" : "text-primary"}>{fallback ? "Rules-based answer" : "AI suggestion"}</Badge></CardHeader>
+      <CardHeader className="panel-header items-start"><div><CardTitle className="text-sm font-medium">Answer from saved data</CardTitle><p className="mt-1 text-xs text-muted-foreground">Uses saved settlement records</p></div><Badge variant="outline" className={fallback ? "text-warning" : "text-primary"}>{fallback ? "Rules-based answer" : "AI suggestion"}</Badge></CardHeader>
       <CardContent className="space-y-5">
         <p className="break-words whitespace-pre-wrap text-sm leading-7 text-foreground">{answer.answer}</p>
         <div className="border-t border-border pt-4"><h3 className="mb-3 text-sm font-medium">How the amount was calculated</h3><Calculation calculation={answer.calculation} /></div>
@@ -72,22 +74,26 @@ export function CopilotPage() {
   const errorMessage = copilotError instanceof ApiError ? copilotError.message : copilotError?.message;
 
   return (
-    <div className="space-y-6">
-      <div className="border-b border-border pb-6"><div className="flex items-center gap-3"><MessageSquare className="size-5 text-primary" aria-hidden="true" /><h1 className="text-3xl font-semibold tracking-tight">Copilot</h1><Badge variant="outline" className="text-warning">Read-only</Badge></div><p className="mt-2 max-w-2xl text-sm text-muted-foreground">Ask about a settlement. Answers use saved records; matching rules and source data are the authority.</p></div>
+    <div className="page-stack">
+      <PageHeader
+        title="Copilot"
+        status={<Badge variant="outline" className="text-warning"><IconMessageCircle aria-hidden="true" /> Read-only</Badge>}
+        description="Ask about a settlement. Answers use saved records; matching rules and source data are the authority."
+      />
 
-      <Card>
-        <CardHeader><CardTitle className="text-sm font-medium">Ask about a settlement</CardTitle></CardHeader>
+      <Card className="gap-0 py-0">
+        <CardHeader className="panel-header"><CardTitle className="text-sm font-medium">Ask about a settlement</CardTitle></CardHeader>
         <CardContent className="space-y-5">
           <div className="grid gap-3 md:grid-cols-2">
-            <label className="space-y-1.5 text-xs font-medium text-muted-foreground" htmlFor="copilot-run">Run<Select id="copilot-run" value={selectedRunId ?? ""} onChange={(event) => { setRunId(event.target.value); setSettlementId(""); copilot.reset(); }}><option value="">{hasRunCatalog ? "Choose a run" : "No completed runs"}</option>{runs.data?.items.map((run) => <option key={run.runId} value={run.runId}>{run.runId} · {run.status}</option>)}</Select></label>
-            <label className="space-y-1.5 text-xs font-medium text-muted-foreground" htmlFor="copilot-settlement">Settlement<Select id="copilot-settlement" value={selectedSettlementId ?? ""} onChange={(event) => { setSettlementId(event.target.value); copilot.reset(); }} disabled={!settlements.data || settlements.data.items.length === 0}><option value="">Choose a settlement</option>{settlements.data?.items.map((settlement) => <option key={settlement.sourceId} value={settlement.sourceId ?? ""}>{settlement.reference ?? settlement.sourceId}</option>)}</Select></label>
+             <label className="field-label" htmlFor="copilot-run">Run<Select id="copilot-run" value={selectedRunId ?? ""} onChange={(event) => { setRunId(event.target.value); setSettlementId(""); copilot.reset(); }}><option value="">{hasRunCatalog ? "Choose a run" : "No completed runs"}</option>{runs.data?.items.map((run) => <option key={run.runId} value={run.runId}>{run.runId} · {run.status}</option>)}</Select></label>
+             <label className="field-label" htmlFor="copilot-settlement">Settlement<Select id="copilot-settlement" value={selectedSettlementId ?? ""} onChange={(event) => { setSettlementId(event.target.value); copilot.reset(); }} disabled={!settlements.data || settlements.data.items.length === 0}><option value="">Choose a settlement</option>{settlements.data?.items.map((settlement) => <option key={settlement.sourceId} value={settlement.sourceId ?? ""}>{settlement.reference ?? settlement.sourceId}</option>)}</Select></label>
           </div>
           <label className="block text-sm font-medium" htmlFor="copilot-question">Question<Textarea id="copilot-question" value={question} onChange={(event) => { setQuestion(event.target.value); copilot.reset(); }} className="mt-2 min-h-28" maxLength={2000} /></label>
-          <div className="flex flex-wrap items-center gap-3"><Button type="button" onClick={submit} disabled={!hasContext || !question.trim() || copilot.isPending}><Send aria-hidden="true" /> {copilot.isPending ? "Checking records…" : "Explain settlement"}</Button>{!hasContext && <span className="text-sm text-muted-foreground">Choose a settlement to continue.</span>}</div>
+           <div className="flex flex-wrap items-center gap-3"><Button type="button" onClick={submit} disabled={!hasContext || !question.trim() || copilot.isPending}><IconSend aria-hidden="true" /> {copilot.isPending ? "Checking records…" : "Explain settlement"}</Button>{!hasContext && <span className="text-sm text-muted-foreground">Choose a settlement to continue.</span>}</div>
         </CardContent>
       </Card>
 
-      {copilot.isError && <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/5 p-4 text-sm text-danger" role="alert"><CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span>Could not explain this settlement. {errorMessage ?? "Something went wrong."}</span></div>}
+      {copilot.isError && <Alert tone="danger"><span className="flex items-start gap-2 text-danger"><IconAlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" /><span>Could not explain this settlement. {errorMessage ?? "Something went wrong."}</span></span></Alert>}
       {copilot.data && <Answer answer={copilot.data} />}
       {!copilot.data && !copilot.isError && settlements.data?.items.length === 0 && <PageState kind="empty" title="No settlement data" description="Reset the demo data or sync a batch before asking about a settlement." />}
     </div>

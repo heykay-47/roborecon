@@ -33,7 +33,7 @@ describe("Layout", () => {
       "href",
       "/runs",
     );
-    expect(screen.getByRole("link", { name: "Transactions" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "Source records" })).toHaveAttribute(
       "href",
       "/transactions",
     );

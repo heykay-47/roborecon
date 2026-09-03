@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { ArrowLeft, Check, CircleAlert, X } from "lucide-react";
+import { IconAlertCircle, IconArrowLeft, IconCheck, IconX } from "@tabler/icons-react";
+import { Alert } from "@/components/alert";
 import {
   CandidateEvidence,
   CriterionEvidenceList,
@@ -10,6 +11,8 @@ import {
   ToolTrace,
 } from "@/components/evidence";
 import { PageState, RetryButton } from "@/components/page-state";
+import { PageHeader } from "@/components/page-header";
+import { Timeline, TimelineItem } from "@/components/timeline";
 import { StatusBadge } from "@/components/status-badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -71,7 +74,7 @@ function Arithmetic({ arithmetic }: { arithmetic: Record<string, unknown> }) {
           <p className="text-xs text-muted-foreground">Values used in the calculation</p>
           <div className="mt-2 space-y-2">
             {observations.map((observation, index) => (
-              <pre key={index} className="overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-background/40 p-3 font-mono text-xs leading-5 text-muted-foreground">
+               <pre key={index} className="overflow-x-auto whitespace-pre-wrap break-words rounded-md bg-muted/35 p-3 font-mono text-xs leading-5 text-muted-foreground">
                 {valueToText(observation)}
               </pre>
             ))}
@@ -101,8 +104,8 @@ function ReviewActions({ exception, onRefresh }: { exception: ExceptionDetail; o
 
   if (!isOpen) {
     return (
-      <div className="rounded-lg border border-border bg-background/30 p-4">
-         <div className="flex items-center gap-2 text-sm font-medium text-foreground"><Check className="size-4 text-success" aria-hidden="true" /> Review complete</div>
+      <div className="rounded-md border border-border bg-muted/20 p-4">
+          <div className="flex items-center gap-2 text-sm font-medium text-foreground"><IconCheck className="size-4 text-success" aria-hidden="true" /> Review complete</div>
         <p className="mt-2 text-sm text-muted-foreground">This exception is {humanizeStatus(exception.status)} and cannot be changed.</p>
         {exception.reviewNote && <p className="mt-3 text-sm leading-6 text-foreground">{exception.reviewNote}</p>}
       </div>
@@ -125,16 +128,16 @@ function ReviewActions({ exception, onRefresh }: { exception: ExceptionDetail; o
 
   return (
     <div className="space-y-4">
-         <div className="rounded-lg border border-warning/20 bg-warning/5 p-4">
+         <Alert tone="warning">
           <p className="text-sm font-medium text-warning">This decision cannot be undone</p>
-          <p className="mt-1 text-sm leading-6 text-warning/80">Approve creates a human-approved link, not an automatic match. Reject marks it Confirmed No-Match. The money stays unresolved.</p>
-       </div>
+          <p className="mt-1 text-sm leading-6 text-warning">Approve creates a human-approved link, not an automatic match. Reject marks it Confirmed No-Match. The money stays unresolved.</p>
+        </Alert>
       {candidates.length > 0 && (
         <fieldset>
           <legend className="text-sm font-medium">Choose a candidate to approve</legend>
           <div className="mt-2 space-y-2">
             {candidates.map((candidate) => (
-               <label key={candidate.candidateId} className="flex cursor-pointer items-start gap-3 rounded-lg border border-border bg-background/30 p-3 has-[:checked]:border-primary/60 has-[:checked]:bg-primary/5">
+               <label key={candidate.candidateId} className="flex cursor-pointer items-start gap-3 rounded-md border border-border bg-muted/20 p-3 has-[:checked]:border-primary/60 has-[:checked]:bg-primary/5">
                  <input type="radio" name="candidate" value={candidate.candidateId} checked={candidateId === candidate.candidateId} onChange={() => setCandidateId(candidate.candidateId)} className="mt-1 accent-primary" />
                 <span className="min-w-0 flex-1"><span className="block break-all font-mono text-xs text-foreground">{candidate.candidateId}</span><span className="mt-1 block text-xs text-muted-foreground">Score {candidate.score} · {candidate.exactIdentifierChain ? "Exact ID match" : "Evidence only"}</span></span>
               </label>
@@ -147,11 +150,11 @@ function ReviewActions({ exception, onRefresh }: { exception: ExceptionDetail; o
          <Textarea id="review-note" value={note} onChange={(event) => setNote(event.target.value)} placeholder="Add the evidence behind this decision." className="mt-2 min-h-24" maxLength={4000} />
       </label>
       <div className="flex flex-wrap gap-2">
-         <Button type="button" variant="default" disabled={candidates.length === 0} onClick={() => chooseAction("approve")}><Check aria-hidden="true" /> Approve this match</Button>
-         <Button type="button" variant="destructive" onClick={() => chooseAction("reject")}><X aria-hidden="true" /> Reject: no match</Button>
+          <Button type="button" variant="default" disabled={candidates.length === 0} onClick={() => chooseAction("approve")}><IconCheck aria-hidden="true" /> Approve this match</Button>
+          <Button type="button" variant="destructive" onClick={() => chooseAction("reject")}><IconX aria-hidden="true" /> Reject: no match</Button>
       </div>
       {pendingAction && (
-          <div className="rounded-lg border border-primary/30 bg-primary/5 p-4" role="region" aria-label="Confirm review decision">
+           <div className="rounded-md border border-primary/30 bg-primary/8 p-4" role="region" aria-label="Confirm review decision">
           <p className="text-sm font-medium">Confirm {pendingAction === "approve" ? "approval" : "rejection"}?</p>
           <p className="mt-1 text-sm leading-6 text-muted-foreground">This decision is final. It will be added to the audit history and cannot be undone here.</p>
           <div className="mt-3 flex flex-wrap gap-2">
@@ -161,15 +164,17 @@ function ReviewActions({ exception, onRefresh }: { exception: ExceptionDetail; o
         </div>
       )}
        {review.isSuccess && <p className="text-sm text-success" role="status">Decision saved. Refreshing the exception.</p>}
-      {error && (
-         <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-danger/5 p-3 text-sm text-danger" role="alert">
-          <CircleAlert className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
-          <div className="space-y-3">
-            <span className="block">{conflict ? "This exception was reviewed elsewhere. Refresh before deciding again." : error.message}</span>
-            {conflict && <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>Refresh exception</Button>}
-          </div>
-        </div>
-      )}
+       {error && (
+         <Alert tone="danger">
+           <div className="flex items-start gap-2 text-danger">
+             <IconAlertCircle className="mt-0.5 size-4 shrink-0" aria-hidden="true" />
+             <div className="space-y-3">
+               <span className="block">{conflict ? "This exception was reviewed elsewhere. Refresh before deciding again." : error.message}</span>
+               {conflict && <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>Refresh exception</Button>}
+             </div>
+           </div>
+         </Alert>
+       )}
     </div>
   );
 }
@@ -214,15 +219,13 @@ function ExceptionContent({ exception, onRefresh }: { exception: ExceptionDetail
   const investigationRecords = exception.aiInvestigations;
 
   return (
-    <div className="space-y-6">
-      <div className="border-b border-border pb-6">
-          <Link to="/exceptions" className="mb-4 inline-flex min-h-8 items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><ArrowLeft className="size-4" aria-hidden="true" /> Back to exceptions</Link>
-        <div className="flex flex-wrap items-center gap-3">
-          <h1 className="min-w-0 break-all text-2xl font-semibold tracking-tight sm:text-3xl">Exception {exception.exceptionId}</h1>
-          <StatusBadge value={exception.status} />
-        </div>
-        <p className="mt-2 text-sm text-muted-foreground">{humanizeStatus(exception.exceptionType)} · {humanizeStatus(exception.sourceType ?? "unknown source")}</p>
-      </div>
+    <div className="page-stack">
+      <PageHeader
+        title={`Exception ${exception.exceptionId}`}
+        backLink={<Link to="/exceptions" className="mb-3 inline-flex min-h-8 items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"><IconArrowLeft className="size-4" aria-hidden="true" /> Back to exceptions</Link>}
+        status={<StatusBadge value={exception.status} />}
+        description={`${humanizeStatus(exception.exceptionType)} · ${humanizeStatus(exception.sourceType ?? "unknown source")}`}
+      />
 
       <section className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5" aria-label="Exception summary">
         {[
@@ -232,8 +235,8 @@ function ExceptionContent({ exception, onRefresh }: { exception: ExceptionDetail
           ["Status", humanizeStatus(exception.status)],
           ["Investigation", investigationRecords.length > 0 ? "Investigation saved" : "No investigation yet"],
         ].map(([label, value]) => (
-          <div key={label} className="rounded-lg border border-border bg-card p-3">
-            <p className="text-xs text-muted-foreground">{label}</p>
+          <div key={label} className="panel p-3">
+            <p className="eyebrow">{label}</p>
             <p className="mt-1 break-words font-mono text-sm tabular-nums text-foreground">{value}</p>
           </div>
         ))}
@@ -242,9 +245,9 @@ function ExceptionContent({ exception, onRefresh }: { exception: ExceptionDetail
       <div className="grid gap-6 xl:grid-cols-[minmax(0,1.35fr)_minmax(20rem,0.65fr)]">
         <div className="space-y-6">
           <Card>
-            <CardHeader><CardTitle>Issue details</CardTitle></CardHeader>
+            <CardHeader className="border-b border-border"><CardTitle>Issue details</CardTitle></CardHeader>
             <CardContent className="space-y-5">
-               <p className="break-words rounded-lg border border-warning/20 bg-warning/5 p-4 text-sm leading-6 text-warning">{exception.message}</p>
+               <Alert tone="warning" className="text-warning">{exception.message}</Alert>
               <dl className="grid gap-x-8 gap-y-4 sm:grid-cols-2">
                   <div><dt className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Main record</dt><dd className="mt-1 break-all font-mono text-sm">{exception.sourceId ?? "No record ID"}</dd></div>
                   <div><dt className="text-xs uppercase tracking-[0.14em] text-muted-foreground">Run</dt><dd className="mt-1 text-sm">{exception.runId ? <Link className="break-all text-primary hover:text-primary/80" to={`/runs/${exception.runId}`}>Run {exception.runId}</Link> : "None"}</dd></div>
@@ -267,7 +270,7 @@ function ExceptionContent({ exception, onRefresh }: { exception: ExceptionDetail
           </section>
 
           <Card>
-            <CardHeader><CardTitle>Match score and evidence</CardTitle></CardHeader>
+            <CardHeader className="border-b border-border"><CardTitle>Match score and evidence</CardTitle></CardHeader>
             <CardContent className="space-y-5">
               {result ? <ScoreSummary score={result.score} runnerUpScore={result.runnerUpScore} margin={result.margin} autonomous={result.autonomous} /> : <p className="text-sm text-muted-foreground">No match result is linked to this exception.</p>}
               <div><h3 className="mb-3 text-sm font-medium">Why this score</h3><CriterionEvidenceList evidence={exception.criterionEvidence} /></div>
@@ -276,12 +279,12 @@ function ExceptionContent({ exception, onRefresh }: { exception: ExceptionDetail
           </Card>
 
           <Card>
-            <CardHeader><CardTitle>Settlement calculation</CardTitle></CardHeader>
+            <CardHeader className="border-b border-border"><CardTitle>Settlement calculation</CardTitle></CardHeader>
             <CardContent><Arithmetic arithmetic={exception.arithmetic} /></CardContent>
           </Card>
 
           <Card>
-            <CardHeader><CardTitle>AI investigation</CardTitle></CardHeader>
+            <CardHeader className="border-b border-border"><CardTitle>AI investigation</CardTitle></CardHeader>
             <CardContent className="space-y-4">
               <InvestigationAction exception={exception} />
               {investigationRecords.length > 0 ? investigationRecords.map((investigation: AIInvestigation) => <InvestigationTrace key={investigation.investigationId} investigation={investigation} />) : <p className="text-sm text-muted-foreground">No AI investigation is saved. The matching evidence is still the source of truth.</p>}
@@ -290,14 +293,14 @@ function ExceptionContent({ exception, onRefresh }: { exception: ExceptionDetail
         </div>
 
          <aside aria-label="Review tools" className="space-y-6 xl:sticky xl:top-24 xl:self-start">
-          <Card>
-            <CardHeader><CardTitle>Review decision</CardTitle></CardHeader>
+           <Card>
+             <CardHeader className="border-b border-border"><CardTitle>Review decision</CardTitle></CardHeader>
             <CardContent><ReviewActions exception={exception} onRefresh={onRefresh} /></CardContent>
           </Card>
-          <Card>
-            <CardHeader><CardTitle>Audit history</CardTitle></CardHeader>
+           <Card>
+             <CardHeader className="border-b border-border"><CardTitle>Audit history</CardTitle></CardHeader>
             <CardContent>
-               {exception.auditEvents.length > 0 ? <ol className="space-y-4">{exception.auditEvents.map((event) => <li key={event.eventId} className="relative border-l border-border pl-4"><p className="font-mono text-xs text-primary">#{event.sequence} · {formatDateTime(event.occurredAt)}</p><p className="mt-1 text-sm font-medium">{event.summary}</p><p className="mt-1 text-xs text-muted-foreground">{event.actor} · {humanizeStatus(event.eventType)}</p>{event.toolTrace && <ToolTrace trace={[event.toolTrace]} />}</li>)}</ol> : <p className="text-sm text-muted-foreground">No audit events for this exception.</p>}
+                {exception.auditEvents.length > 0 ? <Timeline>{exception.auditEvents.map((event) => <TimelineItem key={event.eventId}><p className="font-mono text-xs text-primary">#{event.sequence} · {formatDateTime(event.occurredAt)}</p><p className="mt-1 text-sm font-medium">{event.summary}</p><p className="mt-1 text-xs text-muted-foreground">{event.actor} · {humanizeStatus(event.eventType)}</p>{event.toolTrace && <ToolTrace trace={[event.toolTrace]} />}</TimelineItem>)}</Timeline> : <p className="text-sm text-muted-foreground">No audit events for this exception.</p>}
             </CardContent>
           </Card>
         </aside>
