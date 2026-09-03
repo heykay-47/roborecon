@@ -139,9 +139,14 @@ export function Layout() {
       >
         <div className="flex items-center justify-between px-2 py-1">
           <div className="flex items-center gap-3">
-            <div className="flex size-9 items-center justify-center rounded-md bg-sidebar-primary text-xs font-black tracking-[-0.12em] text-sidebar-primary-foreground shadow-xs">
-              RR
-            </div>
+            <img
+              src="/roborecon_logo.png"
+              alt=""
+              aria-hidden="true"
+              width="40"
+              height="40"
+              className="size-10 shrink-0 object-contain"
+            />
             <div>
               <p className="font-semibold tracking-tight text-sidebar-foreground">Roborecon</p>
               <p className="text-[0.65rem] uppercase tracking-[0.16em] text-muted-foreground">
@@ -152,11 +157,11 @@ export function Layout() {
           <button
             type="button"
             ref={closeRef}
-             className="flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground lg:hidden"
+            className="flex size-11 items-center justify-center rounded-md text-muted-foreground hover:bg-sidebar-accent hover:text-sidebar-foreground lg:hidden"
             aria-label="Close navigation"
             onClick={() => setMobileOpen(false)}
           >
-             <IconX className="size-4" aria-hidden="true" />
+            <IconX className="size-4" aria-hidden="true" />
           </button>
         </div>
 

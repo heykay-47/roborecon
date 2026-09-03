@@ -18,6 +18,10 @@ describe("Layout", () => {
     );
 
     expect(screen.getByText("Roborecon")).toBeInTheDocument();
+    expect(document.querySelector('img[alt=""]')).toHaveAttribute(
+      "src",
+      "/roborecon_logo.png",
+    );
     expect(screen.getByRole("complementary", { name: "Workspace navigation" })).toBeInTheDocument();
     const toggle = screen.getByRole("button", { name: "Toggle navigation" });
     expect(toggle).toHaveAttribute("aria-expanded", "false");
