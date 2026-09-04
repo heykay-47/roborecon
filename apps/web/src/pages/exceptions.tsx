@@ -94,11 +94,14 @@ function ExceptionCard({ exception }: { exception: ExceptionSummary }) {
 
 export function ExceptionsPage() {
   const [page, setPage] = useState(1);
+  const [filterCatalogsEnabled, setFilterCatalogsEnabled] = useState(false);
   const [filters, setFilters] = useState<Pick<ExceptionFilters, "batchId" | "runId" | "exceptionType" | "status">>({});
   const pageSize = 25;
   const exceptions = useExceptions({ page, pageSize, ...filters });
-  const batches = useBatches(1, 50);
-  const runs = useRuns(1, 50);
+  const batches = useBatches(1, 50, filterCatalogsEnabled);
+  const runs = useRuns(1, 50, filterCatalogsEnabled);
+
+  const enableFilterCatalogs = () => setFilterCatalogsEnabled(true);
 
   const updateFilter = (name: keyof typeof filters, value: string) => {
     setPage(1);
@@ -125,7 +128,10 @@ export function ExceptionsPage() {
         actions={<p className="font-mono text-xs text-muted-foreground">{formatInteger(data.total)} total cases</p>}
       />
 
-      <section className="filter-panel grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Exception filters">
+      <section
+        className="filter-panel grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+        aria-label="Exception filters"
+      >
         <label className="field-label" htmlFor="exception-status">
           Status
           <Select id="exception-status" value={filters.status ?? ""} onChange={(event) => updateFilter("status", event.target.value)}>
@@ -134,7 +140,7 @@ export function ExceptionsPage() {
         </label>
         <label className="field-label" htmlFor="exception-batch">
           Batch
-          <Select id="exception-batch" value={filters.batchId ?? ""} onChange={(event) => updateFilter("batchId", event.target.value)} disabled={batches.isLoading}>
+          <Select id="exception-batch" value={filters.batchId ?? ""} onChange={(event) => updateFilter("batchId", event.target.value)} onFocus={enableFilterCatalogs} onPointerDown={enableFilterCatalogs}>
             <option value="">All batches</option>
             {batches.data?.items.map((batch) => <option key={batch.batchId} value={batch.batchId}>{batch.batchId} · {batch.kind}</option>)}
           </Select>
@@ -147,7 +153,7 @@ export function ExceptionsPage() {
         </label>
         <label className="field-label" htmlFor="exception-run">
           Run
-          <Select id="exception-run" value={filters.runId ?? ""} onChange={(event) => updateFilter("runId", event.target.value)} disabled={runs.isLoading}>
+          <Select id="exception-run" value={filters.runId ?? ""} onChange={(event) => updateFilter("runId", event.target.value)} onFocus={enableFilterCatalogs} onPointerDown={enableFilterCatalogs}>
             <option value="">All runs</option>
             {runs.data?.items.map((run) => <option key={run.runId} value={run.runId}>{run.runId}</option>)}
           </Select>

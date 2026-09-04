@@ -19,6 +19,26 @@ const exception = {
 };
 
 describe("exceptions queue", () => {
+  it("defers batch and run catalog requests until those filters receive focus", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ items: [], total: 0, page: 1, pageSize: 25 })),
+    );
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/exceptions" element={<ExceptionsPage />} />
+      </Routes>,
+      { route: "/exceptions" },
+    );
+
+    expect(await screen.findByRole("heading", { name: "Exceptions" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.focus(screen.getByLabelText("Batch"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(3));
+  });
+
   it("renders operational fields and reloads when the status filter changes", async () => {
     const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const path = String(input);

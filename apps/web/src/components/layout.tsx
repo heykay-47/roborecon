@@ -171,13 +171,6 @@ export function Layout() {
         <div className="mt-2">
           <NavigationLinks onNavigate={() => setMobileOpen(false)} />
         </div>
-
-        <div className="mt-auto border-t border-sidebar-border px-3 pt-4">
-          <p className="text-xs font-medium text-sidebar-foreground">Matching rules</p>
-          <p className="mt-1 text-xs leading-5 text-muted-foreground">
-            Rules decide matches. Review anything unclear.
-          </p>
-        </div>
       </aside>
 
       {mobileOpen && (

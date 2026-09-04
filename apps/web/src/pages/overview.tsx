@@ -1,13 +1,5 @@
+import { lazy, Suspense } from "react";
 import { useNavigate } from "react-router-dom";
-import {
-  Bar,
-  BarChart,
-  CartesianGrid,
-  ResponsiveContainer,
-  Tooltip,
-  XAxis,
-  YAxis,
-} from "recharts";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Alert } from "@/components/alert";
@@ -28,8 +20,21 @@ import {
   formatInteger,
   formatPercent,
 } from "@/lib/format";
-import { humanizeStatus } from "@/lib/status-colors";
 import type { BatchStatus } from "@/types/api";
+
+const OverviewChart = lazy(() => import("@/components/overview-chart"));
+
+const chartLoadingState = (
+  <div className="flex h-full items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
+    Loading chart…
+  </div>
+);
+
+const chartUnavailableState = (
+  <div className="flex h-full items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
+    The chart is not available in this browser.
+  </div>
+);
 
 function OverviewActions({
   batchId,
@@ -248,41 +253,11 @@ export function OverviewPage() {
           ) : (
             <div className="mt-6 h-64 w-full">
               {typeof ResizeObserver === "undefined" ? (
-                <div className="flex h-full items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
-                   The chart is not available in this browser.
-                </div>
+                chartUnavailableState
               ) : (
-                <ResponsiveContainer width="100%" height="100%">
-                  <BarChart data={scenarios} margin={{ top: 8, right: 8, left: -18, bottom: 8 }}>
-                    <CartesianGrid stroke="var(--border)" strokeDasharray="2 4" vertical={false} />
-                    <XAxis
-                      dataKey="scenarioClass"
-                      tickFormatter={humanizeStatus}
-                      tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <YAxis
-                      tickFormatter={(value: number) => `${value}%`}
-                      tick={{ fill: "var(--muted-foreground)", fontSize: 11 }}
-                      axisLine={false}
-                      tickLine={false}
-                    />
-                    <Tooltip
-                       cursor={{ fill: "var(--muted)" }}
-                       contentStyle={{
-                         background: "var(--popover)",
-                         border: "1px solid var(--border)",
-                         borderRadius: "8px",
-                         color: "var(--popover-foreground)",
-                       }}
-                      formatter={(value) => [formatPercent(typeof value === "number" ? value : null), "Rate"]}
-                      labelFormatter={(label) => humanizeStatus(String(label))}
-                    />
-                     <Bar dataKey="matchRate" name="Match rate" fill="var(--chart-1)" radius={[3, 3, 0, 0]} />
-                     <Bar dataKey="precision" name="Precision" fill="var(--chart-2)" radius={[3, 3, 0, 0]} />
-                  </BarChart>
-                </ResponsiveContainer>
+                <Suspense fallback={chartLoadingState}>
+                  <OverviewChart scenarios={scenarios} />
+                </Suspense>
               )}
             </div>
           )}

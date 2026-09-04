@@ -4,6 +4,26 @@ import { CopilotPage } from "@/pages/copilot";
 import { renderWithProviders } from "@/test/render";
 
 describe("Copilot page", () => {
+  it("keeps the settlement form content padded from the card edges", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const path = String(input);
+      if (path.includes("reconciliation-runs")) {
+        return new Response(JSON.stringify({ items: [{ runId: "run-001", batchId: "batch-001", batchKind: "demo", status: "completed" }], total: 1, page: 1, pageSize: 25 }));
+      }
+      return new Response(JSON.stringify({ items: [], total: 0, page: 1, pageSize: 200 }));
+    });
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/copilot" element={<CopilotPage />} />
+      </Routes>,
+      { route: "/copilot" },
+    );
+
+    const formCard = (await screen.findByRole("heading", { name: "Ask about a settlement" })).closest('[data-slot="card"]');
+    expect(formCard?.querySelector('[data-slot="card-content"]')).toHaveClass("py-4");
+  });
+
   it("renders a grounded answer with clickable citations and calculation", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
       const path = String(input);

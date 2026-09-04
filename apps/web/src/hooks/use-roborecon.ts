@@ -96,7 +96,7 @@ export function useRunReconciliation() {
   });
 }
 
-export function useRuns(page = 1, pageSize = 50) {
+export function useRuns(page = 1, pageSize = 50, enabled = true) {
   return useQuery({
     queryKey: [...queryKeys.runs, page, pageSize],
     queryFn: () =>
@@ -104,6 +104,7 @@ export function useRuns(page = 1, pageSize = 50) {
         `/reconciliation-runs?page=${page}&page_size=${pageSize}`,
       ),
     placeholderData: (previousData) => previousData,
+    enabled,
   });
 }
 
@@ -145,6 +146,7 @@ export function useException(exceptionId: string | undefined) {
 }
 
 export interface ExceptionFilters {
+  enabled?: boolean;
   page?: number;
   pageSize?: number;
   batchId?: string;
@@ -169,15 +171,17 @@ export function useExceptions(filters: ExceptionFilters = {}) {
     queryKey: [...queryKeys.exceptions, filters],
     queryFn: () => fetchApi<PaginatedResponse<ExceptionSummary>>(exceptionPath(filters)),
     placeholderData: (previousData) => previousData,
+    enabled: filters.enabled ?? true,
   });
 }
 
-export function useBatches(page = 1, pageSize = 50) {
+export function useBatches(page = 1, pageSize = 50, enabled = true) {
   return useQuery({
     queryKey: [...queryKeys.batches, page, pageSize],
     queryFn: () =>
       fetchApi<PaginatedResponse<Batch>>(`/batches?page=${page}&page_size=${pageSize}`),
     placeholderData: (previousData) => previousData,
+    enabled,
   });
 }
 

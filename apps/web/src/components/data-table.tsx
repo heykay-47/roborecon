@@ -35,6 +35,7 @@ export function DataTable<TData extends object>({
     getCoreRowModel: getCoreRowModel(),
     getRowId,
   });
+  const rows = table.getRowModel().rows;
 
   return (
     <Table>
@@ -52,8 +53,8 @@ export function DataTable<TData extends object>({
         ))}
       </TableHeader>
       <TableBody>
-        {table.getRowModel().rows.length > 0 ? (
-          table.getRowModel().rows.map((row) => (
+        {rows.length > 0 ? (
+          rows.map((row) => (
             <TableRow key={row.id}>
               {row.getVisibleCells().map((cell) => (
                 <TableCell key={cell.id}>

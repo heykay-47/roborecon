@@ -31,8 +31,8 @@ function Answer({ answer }: { answer: CopilotAnswer }) {
   const fallback = answer.mode === "deterministicFallback";
   return (
     <Card>
-      <CardHeader className="panel-header items-start"><div><CardTitle className="text-sm font-medium">Answer from saved data</CardTitle><p className="mt-1 text-xs text-muted-foreground">Uses saved settlement records</p></div><Badge variant="outline" className={fallback ? "text-warning" : "text-primary"}>{fallback ? "Rules-based answer" : "AI suggestion"}</Badge></CardHeader>
-      <CardContent className="space-y-5">
+       <CardHeader className="panel-header items-start"><div><CardTitle className="text-sm font-medium">Answer from saved data</CardTitle><p className="mt-1 text-xs text-muted-foreground">Uses saved settlement records</p></div><Badge variant="outline" className={fallback ? "text-warning" : "text-primary"}>{fallback ? "Rules-based answer" : "AI suggestion"}</Badge></CardHeader>
+       <CardContent className="space-y-5">
         <p className="break-words whitespace-pre-wrap text-sm leading-7 text-foreground">{answer.answer}</p>
         <div className="border-t border-border pt-4"><h3 className="mb-3 text-sm font-medium">How the amount was calculated</h3><Calculation calculation={answer.calculation} /></div>
         <CitationList citations={answer.citations} />
@@ -83,7 +83,7 @@ export function CopilotPage() {
 
       <Card className="gap-0 py-0">
         <CardHeader className="panel-header"><CardTitle className="text-sm font-medium">Ask about a settlement</CardTitle></CardHeader>
-        <CardContent className="space-y-5">
+        <CardContent className="space-y-5 py-4">
           <div className="grid gap-3 md:grid-cols-2">
              <label className="field-label" htmlFor="copilot-run">Run<Select id="copilot-run" value={selectedRunId ?? ""} onChange={(event) => { setRunId(event.target.value); setSettlementId(""); copilot.reset(); }}><option value="">{hasRunCatalog ? "Choose a run" : "No completed runs"}</option>{runs.data?.items.map((run) => <option key={run.runId} value={run.runId}>{run.runId} · {run.status}</option>)}</Select></label>
              <label className="field-label" htmlFor="copilot-settlement">Settlement<Select id="copilot-settlement" value={selectedSettlementId ?? ""} onChange={(event) => { setSettlementId(event.target.value); copilot.reset(); }} disabled={!settlements.data || settlements.data.items.length === 0}><option value="">Choose a settlement</option>{settlements.data?.items.map((settlement) => <option key={settlement.sourceId} value={settlement.sourceId ?? ""}>{settlement.reference ?? settlement.sourceId}</option>)}</Select></label>

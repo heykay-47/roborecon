@@ -1,9 +1,29 @@
-import { screen } from "@testing-library/react";
+import { fireEvent, screen, waitFor } from "@testing-library/react";
 import { Route, Routes } from "react-router-dom";
 import { AuditPage } from "@/pages/audit";
 import { renderWithProviders } from "@/test/render";
 
 describe("audit page", () => {
+  it("defers the filter catalogs, including the large exception list, until needed", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ items: [], total: 0, page: 1, pageSize: 25 })),
+    );
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/audit" element={<AuditPage />} />
+      </Routes>,
+      { route: "/audit" },
+    );
+
+    expect(await screen.findByRole("heading", { name: "Audit" })).toBeInTheDocument();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+
+    fireEvent.focus(screen.getByLabelText("Exception"));
+
+    await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(4));
+  });
+
   it("renders events in chronological sequence with actors and tool traces", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       new Response(JSON.stringify({

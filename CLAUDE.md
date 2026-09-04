@@ -48,3 +48,17 @@ Run focused container checks when iterating. The full API invocation has `python
 ## Collaboration
 
 Preserve unrelated worktree changes. Keep implementation commits scoped to the requested task.
+
+## Agent skills
+
+### Issue tracker
+
+Issues and specs for this repo live as GitHub issues. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Triage uses the default canonical labels: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, and `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Domain docs use a single-context layout at the repo root. See `docs/agents/domain.md`.

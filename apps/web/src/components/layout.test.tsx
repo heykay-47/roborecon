@@ -18,6 +18,7 @@ describe("Layout", () => {
     );
 
     expect(screen.getByText("Roborecon")).toBeInTheDocument();
+    expect(screen.queryByText("Matching rules")).not.toBeInTheDocument();
     expect(document.querySelector('img[alt=""]')).toHaveAttribute(
       "src",
       "/roborecon_logo.png",

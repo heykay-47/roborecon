@@ -68,12 +68,15 @@ function AuditEventCard({ event }: { event: AuditEvent }) {
 
 export function AuditPage() {
   const [page, setPage] = useState(1);
+  const [filterCatalogsEnabled, setFilterCatalogsEnabled] = useState(false);
   const [filters, setFilters] = useState<Pick<AuditFilters, "batchId" | "runId" | "exceptionId" | "eventType">>({});
   const pageSize = 25;
   const audit = useAuditEvents({ page, pageSize, ...filters });
-  const batches = useBatches(1, 50);
-  const runs = useRuns(1, 50);
-  const exceptions = useExceptions({ page: 1, pageSize: 200 });
+  const batches = useBatches(1, 50, filterCatalogsEnabled);
+  const runs = useRuns(1, 50, filterCatalogsEnabled);
+  const exceptions = useExceptions({ page: 1, pageSize: 200, enabled: filterCatalogsEnabled });
+
+  const enableFilterCatalogs = () => setFilterCatalogsEnabled(true);
 
   const updateFilter = (name: keyof typeof filters, value: string) => {
     setPage(1);
@@ -98,10 +101,13 @@ export function AuditPage() {
         actions={<p className="font-mono text-xs text-muted-foreground">{formatInteger(audit.data.total)} events</p>}
       />
 
-      <section className="filter-panel grid gap-3 sm:grid-cols-2 lg:grid-cols-4" aria-label="Audit filters">
-        <label className="field-label" htmlFor="audit-batch">Batch<Select id="audit-batch" value={filters.batchId ?? ""} onChange={(event) => updateFilter("batchId", event.target.value)}><option value="">All batches</option>{batches.data?.items.map((batch) => <option key={batch.batchId} value={batch.batchId}>{batch.batchId}</option>)}</Select></label>
-        <label className="field-label" htmlFor="audit-run">Run<EntitySelect id="audit-run" value={filters.runId ?? ""} onChange={(event) => updateFilter("runId", event.target.value)}><option value="">All runs</option>{runs.data?.items.map((run) => <option key={run.runId} value={run.runId}>{run.runId}</option>)}</EntitySelect></label>
-        <label className="field-label" htmlFor="audit-exception">Exception<EntitySelect id="audit-exception" value={filters.exceptionId ?? ""} onChange={(event) => updateFilter("exceptionId", event.target.value)}><option value="">All exceptions</option>{exceptions.data?.items.map((exception) => <option key={exception.exceptionId} value={exception.exceptionId}>{exception.exceptionId}</option>)}</EntitySelect></label>
+      <section
+        className="filter-panel grid gap-3 sm:grid-cols-2 lg:grid-cols-4"
+        aria-label="Audit filters"
+      >
+        <label className="field-label" htmlFor="audit-batch">Batch<Select id="audit-batch" value={filters.batchId ?? ""} onChange={(event) => updateFilter("batchId", event.target.value)} onFocus={enableFilterCatalogs} onPointerDown={enableFilterCatalogs}><option value="">All batches</option>{batches.data?.items.map((batch) => <option key={batch.batchId} value={batch.batchId}>{batch.batchId}</option>)}</Select></label>
+        <label className="field-label" htmlFor="audit-run">Run<EntitySelect id="audit-run" value={filters.runId ?? ""} onChange={(event) => updateFilter("runId", event.target.value)} onFocus={enableFilterCatalogs} onPointerDown={enableFilterCatalogs}><option value="">All runs</option>{runs.data?.items.map((run) => <option key={run.runId} value={run.runId}>{run.runId}</option>)}</EntitySelect></label>
+        <label className="field-label" htmlFor="audit-exception">Exception<EntitySelect id="audit-exception" value={filters.exceptionId ?? ""} onChange={(event) => updateFilter("exceptionId", event.target.value)} onFocus={enableFilterCatalogs} onPointerDown={enableFilterCatalogs}><option value="">All exceptions</option>{exceptions.data?.items.map((exception) => <option key={exception.exceptionId} value={exception.exceptionId}>{exception.exceptionId}</option>)}</EntitySelect></label>
         <label className="field-label" htmlFor="audit-event-type">Event<Select id="audit-event-type" value={filters.eventType ?? ""} onChange={(event) => updateFilter("eventType", event.target.value)}>{eventTypes.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</Select></label>
       </section>
       <Card className="gap-0 py-0">
