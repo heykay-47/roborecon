@@ -25,6 +25,7 @@ from app.razorpay.model import (  # noqa: F401
 )
 from app.razorpay.router import router as razorpay_router
 from app.reconciliation.model import (  # noqa: F401
+    BatchCloseBrief,
     MatchLink,
     ReconciliationException,
     ReconciliationResult,
@@ -38,10 +39,11 @@ from app.reconciliation.router import (
 )
 from app.settlement.model import BankCredit, Settlement, SettlementLine  # noqa: F401
 
-_RAZORPAY_AUDIT_EVENT_VALUES = (
+_ADDITIONAL_AUDIT_EVENT_VALUES = (
     "razorpay_sync_started",
     "razorpay_sync_completed",
     "razorpay_sync_failed",
+    "batch_close_brief_generated",
 )
 
 _TASK7_COLUMNS = (
@@ -54,7 +56,7 @@ _TASK7_COLUMNS = (
 
 
 async def _ensure_audit_event_enum_values(connection) -> None:
-    for value in _RAZORPAY_AUDIT_EVENT_VALUES:
+    for value in _ADDITIONAL_AUDIT_EVENT_VALUES:
         await connection.execute(
             text(
                 "ALTER TYPE auditeventtype ADD VALUE IF NOT EXISTS "

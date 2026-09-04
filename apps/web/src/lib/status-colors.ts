@@ -24,6 +24,11 @@ export const runStatusStyles: Record<string, string> = {
   failed: danger,
 };
 
+export const closePostureStyles: Record<string, string> = {
+  ready: positive,
+  "review required": warning,
+};
+
 export const batchStatusStyles: Record<string, string> = {
   pending: warning,
   running: active,
@@ -88,6 +93,7 @@ export function statusClass(value: string): string {
   return (
     resultStatusStyles[value] ??
     runStatusStyles[value] ??
+    closePostureStyles[value] ??
     batchStatusStyles[value] ??
     reconciliationStateStyles[value] ??
     transactionStatusStyles[value] ??

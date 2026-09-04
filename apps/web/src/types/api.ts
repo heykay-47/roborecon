@@ -17,6 +17,8 @@ export type ResultStatus =
   | "confirmed_no_match";
 export type ExceptionStatus = "open" | "approved" | "rejected";
 export type ReviewAction = "approve" | "reject";
+export type ClosePosture = "ready" | "review required";
+export type CloseBriefMode = "provider" | "deterministicFallback" | "not required";
 
 export interface Batch {
   batchId: string;
@@ -204,10 +206,69 @@ export interface RunSummary {
   errorMessage: string | null;
 }
 
+export interface BatchCloseCitation {
+  exceptionId: string;
+  sourceType?: string | null;
+  sourceId?: string | null;
+}
+
+export interface BatchCloseTheme {
+  themeId: string;
+  title: string;
+  summary: string;
+  exceptionIds: string[];
+  exceptionCount: number;
+  moneyExposure: number;
+  priority: number;
+  reviewAction: string;
+  citations: BatchCloseCitation[];
+}
+
+export interface BatchCloseReviewAction {
+  priority: number;
+  action: string;
+  exceptionIds: string[];
+  citations: BatchCloseCitation[];
+}
+
+export interface BatchCloseBrief {
+  briefId: string;
+  runId: string;
+  batchId: string;
+  posture: ClosePosture;
+  deterministicCoverage: {
+    sourceRows: number;
+    results: number;
+    openExceptions: number;
+  };
+  aiCoverage: {
+    openExceptions: number;
+    coveredExceptions: number;
+  };
+  moneyReconciled: number;
+  moneyUnresolved: number;
+  openExceptions: number;
+  financialRecordsChanged: number;
+  mode: CloseBriefMode;
+  provider: string | null;
+  model: string | null;
+  themes: BatchCloseTheme[];
+  reviewPlan: BatchCloseReviewAction[];
+  citations: BatchCloseCitation[];
+  generatedAt: string;
+  stale: boolean;
+  staleAt: string | null;
+  durationMs: number;
+  errorCode: string | null;
+  errorMessage: string | null;
+  actor: string;
+}
+
 export interface RunDetail extends RunSummary {
   results: ReconciliationResult[];
   links: MatchLink[];
   exceptions: ExceptionSummary[];
+  closeBrief: BatchCloseBrief | null;
 }
 
 export interface TransactionRecord {

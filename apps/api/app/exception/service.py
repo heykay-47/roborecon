@@ -334,6 +334,9 @@ async def review_exception(
                 ),
             )
             run.metrics = updated_metrics
+            from app.reconciliation.close_brief import mark_latest_brief_stale
+
+            await mark_latest_brief_stale(session, run.id, reviewed_at)
         audit_source_type = (
             candidate_source[0]
             if candidate_source is not None

@@ -4,11 +4,19 @@ from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.investigator import sanitize_actor
 from app.batch.model import Batch
 from app.common.enums import RunStatus
 from app.database import get_session
 from app.evaluation.model import is_current_evaluation_report
 from app.evaluation.service import evaluate_run
+from app.reconciliation.close_brief import (
+    CloseBriefConflict,
+    CloseBriefNotFound,
+    assess_batch_close,
+    close_brief_response,
+    latest_close_brief,
+)
 from app.reconciliation.model import (
     MatchLink,
     ReconciliationException,
@@ -16,6 +24,8 @@ from app.reconciliation.model import (
     ReconciliationRun,
 )
 from app.reconciliation.schema import (
+    BatchCloseBriefRequest,
+    BatchCloseBriefResponse,
     ExceptionResponse,
     MatchLinkResponse,
     ReconciliationMetricsResponse,
@@ -57,6 +67,7 @@ async def _run_response(
     results: list[ReconciliationResultResponse] = []
     links: list[MatchLinkResponse] = []
     exceptions: list[ExceptionResponse] = []
+    close_brief: BatchCloseBriefResponse | None = None
     if include_detail:
         result_rows = (
             await session.execute(
@@ -82,6 +93,9 @@ async def _run_response(
         results = [_result_response(row) for row in result_rows]
         links = [_link_response(row) for row in link_rows]
         exceptions = [_exception_response(row) for row in exception_rows]
+        brief = await latest_close_brief(session, run.id)
+        if brief is not None:
+            close_brief = close_brief_response(brief)
     return ReconciliationRunResponse(
         id=run.id,
         batch_id=run.batch_id,
@@ -102,6 +116,7 @@ async def _run_response(
         results=results,
         links=links,
         exceptions=exceptions,
+        close_brief=close_brief,
     )
 
 
@@ -182,6 +197,31 @@ async def get_reconciliation_run(
         raise HTTPException(status_code=404, detail="Reconciliation run not found")
     await _evaluate_if_needed(session, run)
     return await _run_response(session, run, include_detail=True)
+
+
+@router.post(
+    "/{run_id}/close-brief",
+    response_model=BatchCloseBriefResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+async def create_close_brief(
+    run_id: UUID,
+    request: BatchCloseBriefRequest | None = None,
+    session: AsyncSession = Depends(get_session),
+) -> BatchCloseBriefResponse:
+    try:
+        brief = await assess_batch_close(
+            session,
+            run_id,
+            actor=sanitize_actor(
+                request.actor if request is not None else "human", fallback="human"
+            ),
+        )
+    except CloseBriefNotFound as error:
+        raise HTTPException(status_code=404, detail=str(error)) from error
+    except CloseBriefConflict as error:
+        raise HTTPException(status_code=409, detail=str(error)) from error
+    return close_brief_response(brief)
 
 
 @router.get(

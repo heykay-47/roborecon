@@ -17,6 +17,7 @@ from app.evaluation.model import EvaluationCase, GroundTruthLink
 from app.ledger.model import LedgerEntry
 from app.razorpay.model import RazorpayOrder, RazorpayPayment, RazorpayRefund
 from app.reconciliation.model import (
+    BatchCloseBrief,
     MatchLink,
     ReconciliationException,
     ReconciliationResult,
@@ -25,6 +26,7 @@ from app.reconciliation.model import (
 from app.settlement.model import BankCredit, Settlement, SettlementLine
 
 ROBORECON_TABLES = (
+    BatchCloseBrief,
     AIInvestigationRecord,
     MatchLink,
     ReconciliationException,

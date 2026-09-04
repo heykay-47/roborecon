@@ -3,7 +3,7 @@ import { Route, Routes } from "react-router-dom";
 import { RunsPage } from "@/pages/runs";
 import { RunDetailPage } from "@/pages/run-detail";
 import { renderWithProviders } from "@/test/render";
-import type { RunDetail, RunSummary } from "@/types/api";
+import type { BatchCloseBrief, RunDetail, RunSummary } from "@/types/api";
 
 const run: RunSummary = {
   runId: "run-001",
@@ -84,6 +84,68 @@ const detail: RunDetail = {
   ],
   links: [],
   exceptions: [],
+  closeBrief: null,
+};
+
+const closeBrief: BatchCloseBrief = {
+  briefId: "brief-001",
+  runId: "run-001",
+  batchId: "batch-001",
+  posture: "review required",
+  deterministicCoverage: { sourceRows: 415, results: 76, openExceptions: 2 },
+  aiCoverage: { openExceptions: 2, coveredExceptions: 2 },
+  moneyReconciled: 1_000_00,
+  moneyUnresolved: 16_500,
+  openExceptions: 2,
+  financialRecordsChanged: 0,
+  mode: "provider",
+  provider: "gemini",
+  model: "gemma-test",
+  themes: [
+    {
+      themeId: "theme-1",
+      title: "Settlement discrepancy",
+      summary: "Two cases share a settlement arithmetic discrepancy.",
+      exceptionIds: ["exception-001", "exception-002"],
+      exceptionCount: 2,
+      moneyExposure: 16_500,
+      priority: 1,
+      reviewAction: "Review settlement arithmetic against the cited evidence.",
+      citations: [
+        { exceptionId: "exception-001" },
+        { exceptionId: "exception-002" },
+      ],
+    },
+  ],
+  reviewPlan: [
+    {
+      priority: 1,
+      action: "Review settlement arithmetic against the cited evidence.",
+      exceptionIds: ["exception-001", "exception-002"],
+      citations: [
+        { exceptionId: "exception-001" },
+        { exceptionId: "exception-002" },
+      ],
+    },
+  ],
+  citations: [{ exceptionId: "exception-001" }, { exceptionId: "exception-002" }],
+  generatedAt: "2026-08-26T09:05:00Z",
+  stale: false,
+  staleAt: null,
+  durationMs: 240,
+  errorCode: null,
+  errorMessage: null,
+  actor: "human",
+};
+
+const fallbackCloseBrief: BatchCloseBrief = {
+  ...closeBrief,
+  mode: "deterministicFallback",
+  provider: null,
+  model: null,
+  aiCoverage: { openExceptions: 2, coveredExceptions: 0 },
+  errorCode: "timeout",
+  errorMessage: "The AI provider timed out.",
 };
 
 describe("runs routes", () => {
@@ -123,6 +185,64 @@ describe("runs routes", () => {
     expect(screen.getByText("225.54 records/s")).toBeInTheDocument();
     expect(screen.getAllByText("100.0%", { exact: false }).length).toBeGreaterThan(0);
     expect(document.getElementById("result-result-001")).toBeInTheDocument();
+  });
+
+  it("assesses the batch and shows cited close guidance", async () => {
+    const fetchSpy = vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+      if (init?.method === "POST") {
+        return Promise.resolve(
+          new Response(JSON.stringify(closeBrief), { status: 201 }),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify(detail)));
+    });
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/runs/:runId" element={<RunDetailPage />} />
+      </Routes>,
+      { route: "/runs/run-001" },
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Assess batch close" }));
+
+    expect(await screen.findByText(/Review required/i)).toBeInTheDocument();
+    expect(screen.getByText("Settlement discrepancy")).toBeInTheDocument();
+    expect(screen.getByText(/0 financial records changed/i)).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /exception exception-001/i })[0]).toHaveAttribute(
+      "href",
+      "/exceptions/exception-001",
+    );
+    expect(fetchSpy).toHaveBeenCalledWith(
+      expect.stringContaining("/reconciliation-runs/run-001/close-brief"),
+      expect.objectContaining({ method: "POST" }),
+    );
+  });
+
+  it("discloses deterministic fallback mode and cites theme actions", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation((_input, init) => {
+      if (init?.method === "POST") {
+        return Promise.resolve(
+          new Response(JSON.stringify(fallbackCloseBrief), { status: 201 }),
+        );
+      }
+      return Promise.resolve(new Response(JSON.stringify(detail)));
+    });
+
+    renderWithProviders(
+      <Routes>
+        <Route path="/runs/:runId" element={<RunDetailPage />} />
+      </Routes>,
+      { route: "/runs/run-001" },
+    );
+
+    fireEvent.click(await screen.findByRole("button", { name: "Assess batch close" }));
+
+    expect(await screen.findByText("Deterministic fallback")).toBeInTheDocument();
+    expect(screen.getByText("AI coverage")).toBeInTheDocument();
+    expect(screen.getByText(/Provider output was not used/i)).toBeInTheDocument();
+    expect(screen.getByText("Cited Exceptions")).toBeInTheDocument();
+    expect(screen.getAllByRole("link", { name: /exception exception-001/i })).toHaveLength(3);
   });
 
   it("keeps placeholder rows visible while fetching the next run page", async () => {

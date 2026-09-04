@@ -3,6 +3,7 @@ import { fetchApi } from "@/lib/api";
 import type {
   AIInvestigation,
   AuditEvent,
+  BatchCloseBrief,
   Batch,
   CopilotAnswer,
   ExceptionDetail,
@@ -111,6 +112,27 @@ export function useRun(runId: string | undefined) {
     queryKey: [...queryKeys.runs, runId],
     queryFn: () => fetchApi<RunDetail>(`/reconciliation-runs/${runId}`),
     enabled: Boolean(runId),
+  });
+}
+
+export interface AssessBatchCloseInput {
+  runId: string;
+  actor?: string;
+}
+
+export function useAssessBatchClose() {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: ({ runId, actor = "human" }: AssessBatchCloseInput) =>
+      fetchApi<BatchCloseBrief>(`/reconciliation-runs/${runId}/close-brief`, {
+        method: "POST",
+        body: JSON.stringify({ actor }),
+      }),
+    onSuccess: (brief) => {
+      queryClient.setQueryData<RunDetail>([...queryKeys.runs, brief.runId], (current) =>
+        current ? { ...current, closeBrief: brief } : current,
+      );
+    },
   });
 }
 

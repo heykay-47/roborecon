@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     ai_max_tool_rounds: int = Field(default=4, ge=1, le=4)
     ai_max_source_ids: int = Field(default=10, ge=1, le=10)
     ai_max_tool_rows: int = Field(default=100, ge=1, le=1000)
+    ai_max_batch_close_prompt_chars: int = Field(default=100_000, ge=1_000, le=1_000_000)
     cors_origins: str = "http://localhost:5173"
 
     @property

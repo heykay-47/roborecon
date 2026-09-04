@@ -1,10 +1,11 @@
 from __future__ import annotations
 
 import enum
+import json
 import uuid
 from typing import Any
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 from sqlalchemy import ForeignKey, Integer, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
@@ -86,6 +87,156 @@ class ProviderRecommendation(BaseModel):
     confidence: int = Field(default=0, ge=0, le=100)
     citations: list[Citation] = Field(default_factory=list)
     tool_request: ToolRequest | None = None
+
+
+class BatchCloseCitation(BaseModel):
+    """A provider citation that must point at a run exception or its source evidence."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    exception_id: uuid.UUID = Field(
+        validation_alias=AliasChoices("exception_id", "exceptionId"),
+        serialization_alias="exceptionId",
+    )
+    source_type: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("source_type", "sourceType"),
+        serialization_alias="sourceType",
+    )
+    source_id: uuid.UUID | None = Field(
+        default=None,
+        validation_alias=AliasChoices("source_id", "sourceId"),
+        serialization_alias="sourceId",
+    )
+
+
+class BatchCloseExceptionContext(BaseModel):
+    """Compact, source-visible exception data safe to send to a provider."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    exception_id: uuid.UUID = Field(
+        validation_alias=AliasChoices("exception_id", "exceptionId"),
+        serialization_alias="exceptionId",
+    )
+    exception_type: str = Field(
+        validation_alias=AliasChoices("exception_type", "exceptionType"),
+        serialization_alias="exceptionType",
+    )
+    stage: str | None = None
+    status: str
+    amount: int = 0
+    message: str = Field(max_length=4000)
+    rule_codes: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("rule_codes", "ruleCodes"),
+        serialization_alias="ruleCodes",
+    )
+    contradiction_codes: list[str] = Field(
+        default_factory=list,
+        validation_alias=AliasChoices("contradiction_codes", "contradictionCodes"),
+        serialization_alias="contradictionCodes",
+    )
+    citations: list[BatchCloseCitation] = Field(default_factory=list)
+
+
+class BatchCloseContext(BaseModel):
+    """Truth-free run digest used for one bounded Batch Close provider call."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    run_id: uuid.UUID = Field(
+        validation_alias=AliasChoices("run_id", "runId"),
+        serialization_alias="runId",
+    )
+    batch_id: uuid.UUID = Field(
+        validation_alias=AliasChoices("batch_id", "batchId"),
+        serialization_alias="batchId",
+    )
+    source_row_count: int = Field(
+        validation_alias=AliasChoices("source_row_count", "sourceRows"),
+        serialization_alias="sourceRows",
+    )
+    result_count: int = Field(
+        validation_alias=AliasChoices("result_count", "results"),
+        serialization_alias="results",
+    )
+    money_reconciled: int = Field(
+        validation_alias=AliasChoices("money_reconciled", "moneyReconciled"),
+        serialization_alias="moneyReconciled",
+    )
+    money_unresolved: int = Field(
+        validation_alias=AliasChoices("money_unresolved", "moneyUnresolved"),
+        serialization_alias="moneyUnresolved",
+    )
+    operational_metrics: dict[str, Any] = Field(
+        validation_alias=AliasChoices("operational_metrics", "operationalMetrics"),
+        serialization_alias="operationalMetrics",
+    )
+    source_counts: dict[str, int] = Field(
+        validation_alias=AliasChoices("source_counts", "sourceCounts"),
+        serialization_alias="sourceCounts",
+    )
+    result_summaries: list[dict[str, Any]] = Field(
+        validation_alias=AliasChoices("result_summaries", "resultSummaries"),
+        serialization_alias="resultSummaries",
+    )
+    open_exceptions: list[BatchCloseExceptionContext] = Field(
+        validation_alias=AliasChoices("open_exceptions", "openExceptions"),
+        serialization_alias="openExceptions",
+    )
+
+    def prompt(self) -> str:
+        digest = json.dumps(
+            self.model_dump(mode="json", by_alias=True),
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        return (
+            "Assess this completed reconciliation run using only the supplied digest. "
+            "Deterministic coverage and money totals are authoritative. Do not request "
+            "tools, SQL, mutations, hidden truth, or records outside this run. Return one "
+            "raw JSON object with a themes array. Each theme must contain title, summary, "
+            "exceptionIds, reviewAction, and citations. Assign every open exception exactly "
+            "once. Each citation must copy an exceptionId from the supplied open exceptions. "
+            "Do not return benchmark accuracy or evaluation claims.\n"
+            f"Run digest: {digest}"
+        )
+
+
+class BatchCloseProviderTheme(BaseModel):
+    """Strict provider-suggested cross-exception theme."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    title: str = Field(
+        min_length=1,
+        max_length=200,
+    )
+    summary: str = Field(
+        min_length=1,
+        max_length=2000,
+    )
+    exception_ids: list[uuid.UUID] = Field(
+        min_length=1,
+        validation_alias=AliasChoices("exception_ids", "exceptionIds"),
+        serialization_alias="exceptionIds",
+    )
+    review_action: str = Field(
+        min_length=1,
+        max_length=1000,
+        validation_alias=AliasChoices("review_action", "reviewAction"),
+        serialization_alias="reviewAction",
+    )
+    citations: list[BatchCloseCitation] = Field(min_length=1)
+
+
+class BatchCloseProviderResponse(BaseModel):
+    """Complete typed response expected from one Batch Close provider call."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    themes: list[BatchCloseProviderTheme] = Field(min_length=1)
 
 
 class AIInvestigation(BaseModel):

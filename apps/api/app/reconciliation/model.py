@@ -99,6 +99,60 @@ class ReconciliationRun(Base):
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
+class BatchCloseBrief(Base):
+    """Append-only, read-only assessment artifact for one completed run."""
+
+    __tablename__ = "batch_close_briefs"
+    __table_args__ = (
+        Index(
+            "uq_batch_close_brief_run_generating",
+            "run_id",
+            unique=True,
+            postgresql_where=text("generation_status = 'generating'"),
+        ),
+    )
+
+    run_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("reconciliation_runs.id"), nullable=False, index=True
+    )
+    batch_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("batches.id"), nullable=False, index=True
+    )
+    generation_status: Mapped[str] = mapped_column(
+        String(20), nullable=False, default="generating"
+    )
+    posture: Mapped[str] = mapped_column(String(30), nullable=False)
+    mode: Mapped[str] = mapped_column(String(40), nullable=False)
+    provider: Mapped[str | None] = mapped_column(String(100), nullable=True)
+    model: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    actor: Mapped[str] = mapped_column(String(100), nullable=False, default="human")
+    source_row_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    result_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    open_exception_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    ai_exception_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    money_reconciled: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    money_unresolved: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    financial_records_changed: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0
+    )
+    deterministic_coverage: Mapped[dict] = mapped_column(
+        JSONB, nullable=False, default=dict
+    )
+    ai_coverage: Mapped[dict] = mapped_column(JSONB, nullable=False, default=dict)
+    themes: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    review_plan: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    citations: Mapped[list[dict]] = mapped_column(JSONB, nullable=False, default=list)
+    generation_duration_ms: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_code: Mapped[str | None] = mapped_column(String(50), nullable=True)
+    error_message: Mapped[str | None] = mapped_column(String(200), nullable=True)
+    generated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    stale_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
+
 class ReconciliationResult(Base):
     """Persisted deterministic outcome and its complete structured evidence."""
 

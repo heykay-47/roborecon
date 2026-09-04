@@ -46,6 +46,7 @@ services:
       AI_MAX_TOOL_ROUNDS: ${AI_MAX_TOOL_ROUNDS:-4}
       AI_MAX_SOURCE_IDS: ${AI_MAX_SOURCE_IDS:-10}
       AI_MAX_TOOL_ROWS: ${AI_MAX_TOOL_ROWS:-100}
+      AI_MAX_BATCH_CLOSE_PROMPT_CHARS: ${AI_MAX_BATCH_CLOSE_PROMPT_CHARS:-100000}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
     depends_on:
       postgres:
@@ -82,6 +83,7 @@ services:
       AI_MAX_TOOL_ROUNDS: ${AI_MAX_TOOL_ROUNDS:-4}
       AI_MAX_SOURCE_IDS: ${AI_MAX_SOURCE_IDS:-10}
       AI_MAX_TOOL_ROWS: ${AI_MAX_TOOL_ROWS:-100}
+      AI_MAX_BATCH_CLOSE_PROMPT_CHARS: ${AI_MAX_BATCH_CLOSE_PROMPT_CHARS:-100000}
       CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:5173,http://localhost:3000}
     command: ["python", "-m", "pytest", "-q"]
     depends_on:

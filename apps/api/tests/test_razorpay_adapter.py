@@ -474,7 +474,7 @@ async def test_existing_audit_enum_values_are_migrated():
     connection = Connection()
     await _ensure_audit_event_enum_values(connection)
 
-    assert len(connection.statements) == 3
+    assert len(connection.statements) == 4
     assert all(
         statement.startswith(
             "ALTER TYPE auditeventtype ADD VALUE IF NOT EXISTS"
@@ -489,6 +489,7 @@ async def test_existing_audit_enum_values_are_migrated():
                 "razorpay_sync_started",
                 "razorpay_sync_completed",
                 "razorpay_sync_failed",
+                "batch_close_brief_generated",
             ),
         )
     )

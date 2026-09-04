@@ -6,7 +6,13 @@ from typing import Any, Protocol
 
 import httpx
 
-from app.ai.model import InvestigationContext, ProviderRecommendation, ToolRequest
+from app.ai.model import (
+    BatchCloseContext,
+    BatchCloseProviderResponse,
+    InvestigationContext,
+    ProviderRecommendation,
+    ToolRequest,
+)
 from app.ai.tools import GEMINI_TOOL_DECLARATIONS, GROQ_TOOL_DECLARATIONS
 from app.config import Settings, settings
 
@@ -21,6 +27,15 @@ class ProviderError(RuntimeError):
         super().__init__(f"{provider} provider failure: {code}")
 
 
+def provider_name(provider: Any) -> str:
+    return str(getattr(provider, "name", provider.__class__.__name__.lower()))[:100]
+
+
+def provider_model(provider: Any) -> str | None:
+    value = getattr(provider, "model", None)
+    return str(value)[:150] if value is not None else None
+
+
 class InvestigationProvider(Protocol):
     name: str
     model: str
@@ -28,6 +43,15 @@ class InvestigationProvider(Protocol):
     async def investigate(
         self, context: InvestigationContext
     ) -> ProviderRecommendation: ...
+
+
+class BatchCloseProvider(Protocol):
+    name: str
+    model: str
+
+    async def assess_batch_close(
+        self, context: BatchCloseContext
+    ) -> BatchCloseProviderResponse: ...
 
 
 def _recommendation_from_json(
@@ -47,6 +71,21 @@ def _json_text(value: str, provider: str, model: str) -> ProviderRecommendation:
     if not isinstance(decoded, Mapping):
         raise ProviderError(provider, model, "malformed_response")
     return _recommendation_from_json(decoded, provider, model)
+
+
+def _batch_close_json_text(
+    value: str, provider: str, model: str
+) -> BatchCloseProviderResponse:
+    try:
+        decoded = json.loads(value)
+    except (TypeError, ValueError) as error:
+        raise ProviderError(provider, model, "malformed_response") from error
+    if not isinstance(decoded, Mapping):
+        raise ProviderError(provider, model, "malformed_response")
+    try:
+        return BatchCloseProviderResponse.model_validate(decoded)
+    except Exception as error:
+        raise ProviderError(provider, model, "malformed_response") from error
 
 
 def _response_json(response: httpx.Response, provider: str, model: str) -> dict[str, Any]:
@@ -157,6 +196,26 @@ class GeminiProvider(_HttpProvider):
                 return _json_text(text, self.name, self.model)
         raise ProviderError(self.name, self.model, "malformed_response")
 
+    async def assess_batch_close(
+        self, context: BatchCloseContext
+    ) -> BatchCloseProviderResponse:
+        response = await self._post(
+            f"{self.base_url}/models/{self.model}:generateContent",
+            headers={"Content-Type": "application/json", "x-goog-api-key": self.api_key},
+            payload={"contents": _batch_close_gemini_contents(context)},
+        )
+        try:
+            parts = response["candidates"][0]["content"]["parts"]
+        except (KeyError, IndexError, TypeError) as error:
+            raise ProviderError(self.name, self.model, "malformed_response") from error
+        for part in parts:
+            if isinstance(part.get("functionCall"), Mapping):
+                raise ProviderError(self.name, self.model, "malformed_response")
+            text = part.get("text")
+            if isinstance(text, str):
+                return _batch_close_json_text(text, self.name, self.model)
+        raise ProviderError(self.name, self.model, "malformed_response")
+
 
 class GroqProvider(_HttpProvider):
     name = "groq"
@@ -224,6 +283,31 @@ class GroqProvider(_HttpProvider):
         if not isinstance(content, str):
             raise ProviderError(self.name, self.model, "malformed_response")
         return _json_text(content, self.name, self.model)
+
+    async def assess_batch_close(
+        self, context: BatchCloseContext
+    ) -> BatchCloseProviderResponse:
+        response = await self._post(
+            f"{self.base_url}/chat/completions",
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.api_key}",
+            },
+            payload={
+                "model": self.model,
+                "messages": _batch_close_groq_messages(context),
+            },
+        )
+        try:
+            message = response["choices"][0]["message"]
+        except (KeyError, IndexError, TypeError) as error:
+            raise ProviderError(self.name, self.model, "malformed_response") from error
+        if message.get("tool_calls"):
+            raise ProviderError(self.name, self.model, "malformed_response")
+        content = message.get("content")
+        if not isinstance(content, str):
+            raise ProviderError(self.name, self.model, "malformed_response")
+        return _batch_close_json_text(content, self.name, self.model)
 
 
 def configured_providers(app_settings: Settings = settings) -> list[InvestigationProvider]:
@@ -318,3 +402,20 @@ def _groq_messages(context: InvestigationContext) -> list[dict[str, Any]]:
         else:
             messages.append(item)
     return messages
+
+
+def _batch_close_gemini_contents(context: BatchCloseContext) -> list[dict[str, Any]]:
+    return [{"role": "user", "parts": [{"text": context.prompt()}]}]
+
+
+def _batch_close_groq_messages(context: BatchCloseContext) -> list[dict[str, Any]]:
+    return [
+        {
+            "role": "system",
+            "content": (
+                "You are a read-only reconciliation close assessor. "
+                "Deterministic coverage and money totals are authoritative."
+            ),
+        },
+        {"role": "user", "content": context.prompt()},
+    ]

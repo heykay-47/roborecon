@@ -182,6 +182,27 @@ async def test_reconciliation_run_history_is_paginated(client):
 
 
 @pytest.mark.asyncio
+async def test_close_brief_returns_conflict_when_assessment_is_already_running(
+    client, monkeypatch
+):
+    from app.reconciliation import router as reconciliation_router
+    from app.reconciliation.close_brief import CloseBriefConflict
+
+    assess = AsyncMock(side_effect=CloseBriefConflict("A close brief is already being generated"))
+    monkeypatch.setattr(reconciliation_router, "assess_batch_close", assess)
+
+    response = await client.post(
+        f"/reconciliation-runs/{uuid4()}/close-brief",
+        json={"actor": " analyst-7 "},
+    )
+
+    assert response.status_code == 409
+    assert response.json()["detail"] == "A close brief is already being generated"
+    assess.assert_awaited_once()
+    assert assess.await_args.kwargs["actor"] == "analyst-7"
+
+
+@pytest.mark.asyncio
 async def test_metrics_without_a_completed_run_returns_not_found(client):
     response = await client.get("/metrics")
 

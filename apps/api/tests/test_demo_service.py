@@ -115,6 +115,7 @@ async def test_reset_demo_deletes_reconciliation_children_before_batches():
     assert [
         table
         for table in (
+            "batch_close_briefs",
             "ai_investigations",
             "match_links",
             "reconciliation_exceptions",
@@ -124,6 +125,7 @@ async def test_reset_demo_deletes_reconciliation_children_before_batches():
         )
         if table in deleted_tables
     ] == [
+        "batch_close_briefs",
         "ai_investigations",
         "match_links",
         "reconciliation_exceptions",

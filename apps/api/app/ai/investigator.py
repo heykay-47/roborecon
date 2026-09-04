@@ -21,6 +21,8 @@ from app.ai.provider import (
     ProviderError,
     configured_providers,
 )
+from app.ai.provider import provider_model as _provider_model
+from app.ai.provider import provider_name as _provider_name
 from app.ai.tools import (
     CrossBatchSourceError,
     ToolError,
@@ -114,15 +116,6 @@ def _exception_context(
         allowed_source_ids=allowed,
         source_references=references,
     )
-
-
-def _provider_name(provider: Any) -> str:
-    return str(getattr(provider, "name", provider.__class__.__name__.lower()))[:100]
-
-
-def _provider_model(provider: Any) -> str | None:
-    value = getattr(provider, "model", None)
-    return str(value)[:150] if value is not None else None
 
 
 def _normalise_recommendation(raw: Any, provider: Any) -> ProviderRecommendation:

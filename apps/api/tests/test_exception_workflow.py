@@ -124,6 +124,7 @@ def _session(
     ]
     if include_locked_run:
         execute_results.append(_Result(scalar_one_or_none=run))
+    execute_results.append(_Result(scalar_one_or_none=None))
     session.execute = AsyncMock(
         side_effect=execute_results
     )

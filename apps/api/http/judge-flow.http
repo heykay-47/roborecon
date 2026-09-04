@@ -19,12 +19,23 @@ Content-Type: application/json
 ### 4. Inspect acceptance metrics
 GET {{baseUrl}}/metrics?run_id={{runId}}
 
-### 5. Inspect exceptions and persisted evidence
+### 5. Assess the full batch close
+POST {{baseUrl}}/reconciliation-runs/{{runId}}/close-brief
+Content-Type: application/json
+
+{
+  "actor": "human"
+}
+
+### 6. Inspect the latest run detail and cited brief
+GET {{baseUrl}}/reconciliation-runs/{{runId}}
+
+### 7. Inspect exceptions and persisted evidence
 GET {{baseUrl}}/exceptions?run_id={{runId}}&status=open
 GET {{baseUrl}}/transactions?batch_id={{batchId}}&page=1&page_size=25
 
-### 6. Inspect outcome-focused audit events
+### 8. Inspect outcome-focused audit events
 GET {{baseUrl}}/audit-events?batch_id={{batchId}}&page=1&page_size=50
 
-### Optional: run the read-only Razorpay Test Mode adapter
+### 9. Optional: run the read-only Razorpay Test Mode adapter
 POST {{baseUrl}}/razorpay/sync

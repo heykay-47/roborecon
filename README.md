@@ -14,7 +14,7 @@ docker compose up --build -d
 Then open <http://localhost:3000>:
 
 1. **Overview:** confirm the seeded benchmark badge, match rate, precision, false positives, end-to-end autonomous resolution, runtime, and money totals.
-2. **Runs:** open the latest completed run and inspect the two stage metrics, per-class metrics, and every acceptance gate.
+2. **Runs:** open the latest completed run and inspect the two stage metrics, per-class metrics, and every acceptance gate. Select **Assess batch close** to generate the evidence-locked Batch Close Brief.
 3. **Exceptions:** open an unresolved case, inspect deterministic evidence and candidates, run the optional advisory investigation, then approve or reject one case.
 4. **Audit:** confirm the reset, run, investigation, and terminal review events are linked to the batch and actor.
 5. **Copilot:** ask the seeded settlement question and follow its typed source citations. Without an AI key it displays the deterministic fallback, not fabricated prose.
@@ -23,6 +23,12 @@ Then open <http://localhost:3000>:
 
 The seeded offline judge flow is available from the running local web application at
 <http://localhost:3000>.
+
+### Batch Close Brief
+
+The Batch Close Brief is available on completed Run detail pages. **Ready** means the run has no Open Exceptions and no Money Unresolved. Any unresolved work produces **Review required**. The assessment reports deterministic full-run coverage separately from AI coverage, groups every Open Exception into cited themes, and states that `0 financial records changed`.
+
+The provider is read-only and receives only a bounded run digest. `AI_MAX_BATCH_CLOSE_PROMPT_CHARS` sets the maximum provider input size. Invalid, incomplete, unavailable, or timed-out provider output produces a clearly labeled deterministic fallback. A later terminal Review Decision marks the latest brief stale; select **Reassess batch close** to create a new append-only assessment.
 
 The same deterministic acceptance check can be run without the browser:
 
@@ -96,7 +102,7 @@ npm run demo
 
 `npm run verify` runs the documented backend and frontend container checks. No host Python or Node installation is required.
 
-The request examples in `apps/api/http/judge-flow.http` mirror the browser flow: health, demo reset, run, metrics, exceptions, transactions, audit, and optional Test Mode sync.
+The request examples in `apps/api/http/judge-flow.http` cover health, demo reset, runs, Batch Close Brief assessment, metrics, exceptions, transactions, audit, and optional Test Mode sync.
 
 ### Razorpay Test Mode Sync
 

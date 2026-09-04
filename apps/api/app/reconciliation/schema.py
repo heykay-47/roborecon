@@ -2,11 +2,13 @@ from datetime import datetime
 from typing import Any
 from uuid import UUID
 
-from pydantic import Field
+from pydantic import AliasChoices, Field
 
 from app.common.api import ApiModel
 from app.common.enums import (
     BatchKind,
+    CloseBriefMode,
+    ClosePosture,
     ExceptionStatus,
     ReconciliationStage,
     ResultStatus,
@@ -262,6 +264,83 @@ class ReconciliationRunResponse(ApiModel):
     results: list[ReconciliationResultResponse] = Field(default_factory=list)
     links: list[MatchLinkResponse] = Field(default_factory=list)
     exceptions: list[ExceptionResponse] = Field(default_factory=list)
+    close_brief: "BatchCloseBriefResponse | None" = Field(
+        default=None,
+        serialization_alias="closeBrief",
+    )
+
+
+class BatchCloseCitationResponse(ApiModel):
+    exception_id: UUID = Field(serialization_alias="exceptionId")
+    source_type: str | None = Field(default=None, serialization_alias="sourceType")
+    source_id: UUID | None = Field(default=None, serialization_alias="sourceId")
+
+
+class BatchCloseCoverageResponse(ApiModel):
+    source_rows: int = Field(serialization_alias="sourceRows")
+    results: int
+    open_exceptions: int = Field(serialization_alias="openExceptions")
+
+
+class BatchCloseAICoverageResponse(ApiModel):
+    open_exceptions: int = Field(serialization_alias="openExceptions")
+    covered_exceptions: int = Field(serialization_alias="coveredExceptions")
+
+
+class BatchCloseThemeResponse(ApiModel):
+    theme_id: str = Field(serialization_alias="themeId")
+    title: str
+    summary: str
+    exception_ids: list[UUID] = Field(serialization_alias="exceptionIds")
+    exception_count: int = Field(serialization_alias="exceptionCount")
+    money_exposure: int = Field(serialization_alias="moneyExposure")
+    priority: int
+    review_action: str = Field(serialization_alias="reviewAction")
+    citations: list[BatchCloseCitationResponse]
+
+
+class BatchCloseReviewActionResponse(ApiModel):
+    priority: int
+    action: str
+    exception_ids: list[UUID] = Field(serialization_alias="exceptionIds")
+    citations: list[BatchCloseCitationResponse]
+
+
+class BatchCloseBriefRequest(ApiModel):
+    actor: str = Field(default="human", min_length=1, max_length=100)
+
+
+class BatchCloseBriefResponse(ApiModel):
+    brief_id: UUID = Field(
+        validation_alias=AliasChoices("id", "briefId"),
+        serialization_alias="briefId",
+    )
+    run_id: UUID = Field(serialization_alias="runId")
+    batch_id: UUID = Field(serialization_alias="batchId")
+    posture: ClosePosture
+    deterministic_coverage: BatchCloseCoverageResponse = Field(
+        serialization_alias="deterministicCoverage"
+    )
+    ai_coverage: BatchCloseAICoverageResponse = Field(serialization_alias="aiCoverage")
+    money_reconciled: int = Field(serialization_alias="moneyReconciled")
+    money_unresolved: int = Field(serialization_alias="moneyUnresolved")
+    open_exceptions: int = Field(serialization_alias="openExceptions")
+    financial_records_changed: int = Field(serialization_alias="financialRecordsChanged")
+    mode: CloseBriefMode
+    provider: str | None
+    model: str | None
+    themes: list[BatchCloseThemeResponse]
+    review_plan: list[BatchCloseReviewActionResponse] = Field(
+        serialization_alias="reviewPlan"
+    )
+    citations: list[BatchCloseCitationResponse]
+    generated_at: datetime = Field(serialization_alias="generatedAt")
+    stale: bool
+    stale_at: datetime | None = Field(default=None, serialization_alias="staleAt")
+    duration_ms: int = Field(serialization_alias="durationMs")
+    error_code: str | None = Field(default=None, serialization_alias="errorCode")
+    error_message: str | None = Field(default=None, serialization_alias="errorMessage")
+    actor: str
 
 
 class ReconciliationRunListResponse(ApiModel):
@@ -273,3 +352,6 @@ class ReconciliationRunListResponse(ApiModel):
 
 class ReconciliationMetricsResponse(EvaluationReportSchema):
     run_id: UUID = Field(serialization_alias="runId")
+
+
+ReconciliationRunResponse.model_rebuild()

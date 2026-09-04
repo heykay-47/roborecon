@@ -44,6 +44,17 @@ class RunStatus(str, enum.Enum):
     failed = "failed"
 
 
+class ClosePosture(str, enum.Enum):
+    ready = "ready"
+    review_required = "review required"
+
+
+class CloseBriefMode(str, enum.Enum):
+    provider = "provider"
+    deterministic_fallback = "deterministicFallback"
+    not_required = "not required"
+
+
 class ReconciliationStage(str, enum.Enum):
     ledger_to_razorpay = "ledger_to_razorpay"
     razorpay_to_settlement = "razorpay_to_settlement"
@@ -83,6 +94,7 @@ class AuditEventType(str, enum.Enum):
     run_completed = "run.completed"
     run_failed = "run.failed"
     result_persisted = "result.persisted"
+    batch_close_brief_generated = "batch.close_brief.generated"
     ai_tool_called = "ai.tool.called"
     ai_recommendation = "ai.recommendation"
     review_approved = "review.approved"
