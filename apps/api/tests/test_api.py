@@ -1,3 +1,4 @@
+import re
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
@@ -24,6 +25,10 @@ async def test_batches_and_transactions_use_paginated_items(client):
     assert transactions.status_code == 200
     assert batches.json()["items"] == []
     assert transactions.json()["items"] == []
+    assert re.fullmatch(
+        r"db;dur=\d+\.\d{2}, handler;dur=\d+\.\d{2}, total;dur=\d+\.\d{2}",
+        transactions.headers["server-timing"],
+    )
 
 
 @pytest.mark.asyncio
@@ -118,42 +123,6 @@ def test_exception_response_exposes_created_at_and_ai_readiness():
     assert serialized["aiReady"] is True
 
 
-def test_exception_priority_prefers_open_ready_high_value_and_older_cases():
-    from datetime import datetime, timezone
-    from types import SimpleNamespace
-
-    from app.exception.router import _exception_sort_key
-
-    older = SimpleNamespace(
-        id=uuid4(),
-        status="open",
-        amount=10_000,
-        exception_type="duplicate",
-        created_at=datetime(2026, 8, 25, tzinfo=timezone.utc),
-    )
-    higher_value = SimpleNamespace(
-        id=uuid4(),
-        status="open",
-        amount=20_000,
-        exception_type="amount_mismatch",
-        created_at=datetime(2026, 8, 26, tzinfo=timezone.utc),
-    )
-    closed = SimpleNamespace(
-        id=uuid4(),
-        status="approved",
-        amount=99_000,
-        exception_type="duplicate",
-        created_at=datetime(2026, 8, 24, tzinfo=timezone.utc),
-    )
-
-    ordered = sorted(
-        [closed, older, higher_value],
-        key=lambda row: _exception_sort_key(row, ai_ready=row.status == "open"),
-    )
-
-    assert ordered == [higher_value, older, closed]
-
-
 @pytest.mark.asyncio
 async def test_exception_endpoints_return_not_found_for_absent_ids(client):
     exception_id = uuid4()
@@ -179,6 +148,77 @@ async def test_reconciliation_run_history_is_paginated(client):
         "page": 1,
         "pageSize": 10,
     }
+
+
+@pytest.mark.asyncio
+async def test_current_run_history_does_not_recompute_current_metrics(monkeypatch):
+    from datetime import datetime, timezone
+    from types import SimpleNamespace
+
+    from app.common.enums import BatchKind, RunStatus
+    from app.reconciliation import router as reconciliation_router
+
+    report = {
+        "reportVersion": 1,
+        "benchmark_available": True,
+        "precision": 100.0,
+        "false_positives": 0,
+        "false_positive_rate": 0.0,
+        "match_rate": 100.0,
+        "end_to_end_autonomy_rate": 100.0,
+        "exception_recall": 100.0,
+        "correctly_resolved": 1,
+        "matchable_cases": 1,
+        "autonomous_cases": 1,
+        "open_exceptions": 0,
+        "financially_unresolved_cases": 0,
+        "money_reconciled": 10_000,
+        "money_unresolved": 0,
+        "settlement_net": 10_000,
+        "records_processed": 1,
+        "duration_ms": 10,
+        "throughput": 100.0,
+        "per_class": None,
+        "stage_metrics": None,
+        "review_adjusted": {},
+        "acceptance_checks": {},
+        "acceptance_passed": True,
+    }
+    run_id = uuid4()
+    batch_id = uuid4()
+    now = datetime(2026, 8, 26, tzinfo=timezone.utc)
+    run = SimpleNamespace(
+        id=run_id,
+        batch_id=batch_id,
+        status=RunStatus.completed,
+        source_row_count=1,
+        source_counts={},
+        started_at=now,
+        completed_at=now,
+        duration_ms=10,
+        throughput=100.0,
+        metrics=report,
+        error_message=None,
+    )
+    batch = SimpleNamespace(id=batch_id, kind=BatchKind.demo)
+    count_result = SimpleNamespace(scalar=lambda: 1)
+    rows_result = SimpleNamespace(all=lambda: [(run, batch)])
+    session = AsyncMock()
+    session.execute = AsyncMock(side_effect=[count_result, rows_result])
+    evaluate = AsyncMock()
+    monkeypatch.setattr(reconciliation_router, "evaluate_run", evaluate)
+
+    response = await reconciliation_router.list_reconciliation_runs(
+        batch_id=None,
+        run_status=None,
+        page=1,
+        page_size=50,
+        session=session,
+    )
+
+    assert response.total == 1
+    assert response.items[0].metrics is not None
+    evaluate.assert_not_awaited()
 
 
 @pytest.mark.asyncio

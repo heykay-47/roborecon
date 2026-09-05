@@ -7,9 +7,9 @@ cleanup() {
 trap cleanup EXIT
 
 docker compose build
-docker compose run --rm api-test python -m pytest -q
-docker compose run --rm api-test ruff check app tests
-docker compose run --rm api-test python -m app.demo.acceptance
+docker compose run --rm api-test env -u DATABASE_URL python -m pytest -q
+docker compose run --rm api-test env -u DATABASE_URL ruff check app tests
+docker compose run --rm api-test env -u DATABASE_URL python -m app.demo.acceptance
 docker build --target test -t roborecon-web-test apps/web
 docker run --rm roborecon-web-test npm test -- --run
 docker run --rm roborecon-web-test npm exec tsc -- -b

@@ -462,7 +462,7 @@ async def test_failed_sync_persists_a_failed_batch(client, monkeypatch):
 
 @pytest.mark.asyncio
 async def test_existing_audit_enum_values_are_migrated():
-    from app.main import _ensure_audit_event_enum_values
+    from app.database_init import _ensure_audit_event_enum_values
 
     class Connection:
         def __init__(self):

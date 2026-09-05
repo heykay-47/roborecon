@@ -224,7 +224,7 @@ async def test_audit_listing_applies_event_type_filter_in_sql():
 
 @pytest.mark.asyncio
 async def test_audit_sequence_migration_sql_repairs_and_uniquifies_both_scopes():
-    from app.main import _ensure_audit_event_sequence_index
+    from app.database_init import _ensure_audit_event_sequence_index
 
     class _Connection:
         def __init__(self):

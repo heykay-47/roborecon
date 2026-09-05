@@ -8,12 +8,11 @@ from sqlalchemy.exc import DBAPIError, IntegrityError
 
 @pytest.fixture
 async def postgres_schema():
-    from app.common.base import Base
     from app.database import engine
+    from app.database_init import initialize_database
 
     try:
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
+        await initialize_database()
     except (DBAPIError, OSError) as exc:
         pytest.skip(f"PostgreSQL integration container is unavailable: {exc}")
     try:
@@ -27,7 +26,7 @@ async def test_postgres_migration_repairs_duplicate_global_sequences(
     postgres_schema,
 ):
     from app.database import engine
-    from app.main import _ensure_audit_event_sequence_index
+    from app.database_init import _ensure_audit_event_sequence_index
 
     event_ids = [UUID(int=101), UUID(int=102), UUID(int=103)]
     occurred_at = datetime(2026, 1, 1, tzinfo=timezone.utc)

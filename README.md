@@ -92,6 +92,8 @@ docker compose up --build -d
 
 The stack includes PostgreSQL (`5432`), the API (`8000`), and the Web app (`3000`). Health checks start the API after PostgreSQL is ready and start the Web app after the API is ready. `api-test` is a test-only Compose profile and is not part of the normal running stack.
 
+The API container runs `python -m app.database_init` before Uvicorn. Hosted serverless requests do not create tables or repair existing data. To initialize a hosted database before serving traffic, run the same module from the API deployment environment.
+
 Useful commands:
 
 ```bash
@@ -102,6 +104,22 @@ npm run demo
 `npm run verify` runs the backend and frontend checks in containers. You do not need Python or Node installed on the host.
 
 The request examples in `apps/api/http/judge-flow.http` cover health, demo reset, runs, Batch Close Brief assessment, metrics, exceptions, transactions, audit, and optional Test Mode sync.
+
+The list endpoints `/batches`, `/reconciliation-runs`, `/transactions`, `/exceptions`, and `/audit-events` return a `Server-Timing` header with numeric `db`, `handler`, and `total` durations. It contains no source values, SQL, credentials, or evaluation truth.
+
+Run the read-only smoke measurement against a deployed API after one warm-up request per endpoint. It reports the initial request separately from five warmed requests:
+
+```bash
+API_URL=https://roborecon.vercel.app ./scripts/read-smoke.sh
+```
+
+Set `BATCH_ID` to scope the Source records request to a known Batch. The script performs only `GET` requests and does not print response bodies.
+
+Run the container benchmark fixture locally to compare the fixed seeded Batch with two additional 250-row Batches. It prints five `Server-Timing` samples for each targeted read:
+
+```bash
+./scripts/read-benchmark.sh
+```
 
 ### Razorpay Test Mode sync
 
@@ -159,8 +177,7 @@ docker-compose.yml PostgreSQL, API, and Web orchestration
 
 - Live Vercel, Neon, Razorpay, and AI credentials are not stored here. The offline demo and mocked outage paths are the reproducible acceptance baseline.
 - Test Mode imports are source-only batches and do not support benchmark precision claims.
-- Startup uses SQLAlchemy table creation and idempotent adjustments rather than a full migration tool.
-- Some exception prioritization and filtering is intentionally in memory for the fixed demo scale.
+- Database initialization uses an explicit idempotent SQLAlchemy command rather than request-time schema repair.
 - The API's 60-second hosted function limit bounds long-running syncs and reconciliation runs.
 
 ## License

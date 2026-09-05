@@ -15,8 +15,9 @@ from httpx import ASGITransport, AsyncClient
 @asynccontextmanager
 async def _no_op_lifespan(app):
     """
-    Replaces the real lifespan so tests never connect to a real database.
-    The real lifespan runs create_all on startup; we skip that entirely.
+    Keeps HTTP tests isolated from database startup and shutdown hooks.
+
+    Database initialization is an explicit command, not request startup work.
     """
     yield
 
@@ -34,6 +35,7 @@ def _make_mock_session():
         result.scalar.return_value = 0
         result.scalar_one_or_none.return_value = None
         result.scalars.return_value.all.return_value = []
+        result.mappings.return_value.all.return_value = []
         result.all.return_value = []
 
         # .one() is used by the summary endpoint for aggregate queries

@@ -1,8 +1,7 @@
-from datetime import datetime, timezone
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy import func, select
+from sqlalchemy import and_, case, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.investigator import investigate_exception, sanitize_actor
@@ -28,25 +27,6 @@ from app.reconciliation.schema import (
 )
 
 router = APIRouter(prefix="/exceptions", tags=["exceptions"])
-
-
-def _exception_sort_key(
-    exception: ReconciliationException,
-    *,
-    ai_ready: bool,
-) -> tuple[int, int, int, str, datetime, str]:
-    status = getattr(exception.status, "value", exception.status)
-    created_at = exception.created_at
-    if created_at.tzinfo is None:
-        created_at = created_at.replace(tzinfo=timezone.utc)
-    return (
-        0 if status == ExceptionStatus.open.value else 1,
-        0 if ai_ready else 1,
-        -(exception.amount or 0),
-        exception.exception_type,
-        created_at,
-        str(exception.id),
-    )
 
 
 def _exception_response(
@@ -84,40 +64,36 @@ async def list_exceptions(
         )).scalar()
         or 0
     )
-    rows = (
-        await session.execute(select(ReconciliationException).where(*filters))
-    ).scalars().all()
-    investigated_ids: set[UUID] = set()
-    if rows:
-        investigated_ids = set(
-            (
-                await session.execute(
-                    select(AIInvestigationRecord.exception_id).where(
-                        AIInvestigationRecord.exception_id.in_(
-                            [row.id for row in rows]
-                        )
-                    )
-                )
-            )
-            .scalars()
-            .all()
-        )
-    readiness = {
-        row.id: (
-            getattr(row.status, "value", row.status) == ExceptionStatus.open.value
-            and row.id not in investigated_ids
-        )
-        for row in rows
-    }
-    rows.sort(
-        key=lambda row: _exception_sort_key(row, ai_ready=readiness[row.id])
+    investigation_exists = select(AIInvestigationRecord.id).where(
+        AIInvestigationRecord.exception_id == ReconciliationException.id
+    ).exists()
+    ai_ready = and_(
+        ReconciliationException.status == ExceptionStatus.open,
+        ~investigation_exists,
     )
-    offset = (page - 1) * page_size
-    page_rows = rows[offset : offset + page_size]
+    rows = (
+        await session.execute(
+            select(ReconciliationException, ai_ready.label("ai_ready"))
+            .where(*filters)
+            .order_by(
+                case(
+                    (ReconciliationException.status == ExceptionStatus.open, 0),
+                    else_=1,
+                ),
+                case((ai_ready, 0), else_=1),
+                func.coalesce(ReconciliationException.amount, 0).desc(),
+                ReconciliationException.exception_type,
+                ReconciliationException.created_at,
+                ReconciliationException.id,
+            )
+            .offset((page - 1) * page_size)
+            .limit(page_size)
+        )
+    ).all()
     return ExceptionListResponse(
         items=[
-            _exception_response(row, ai_ready=readiness[row.id])
-            for row in page_rows
+            _exception_response(exception, ai_ready=bool(is_ai_ready))
+            for exception, is_ai_ready in rows
         ],
         total=total,
         page=page,

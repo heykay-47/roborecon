@@ -721,13 +721,11 @@ async def test_ordinary_act_as_settlement_question_reaches_settlement_validation
 
 @pytest.fixture
 async def postgres_copilot_schema():
-    import app.main  # noqa: F401
-    from app.common.base import Base
     from app.database import engine
+    from app.database_init import initialize_database
 
     try:
-        async with engine.begin() as connection:
-            await connection.run_sync(Base.metadata.create_all)
+        await initialize_database()
     except (DBAPIError, OSError) as error:
         pytest.skip(f"PostgreSQL integration container is unavailable: {error}")
     try:

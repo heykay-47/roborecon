@@ -59,9 +59,13 @@ async def _run_response(
     run: ReconciliationRun,
     *,
     include_detail: bool,
+    batch: Batch | None = None,
+    evaluate: bool = True,
 ) -> ReconciliationRunResponse:
-    await _evaluate_if_needed(session, run)
-    batch = await session.get(Batch, run.batch_id)
+    if evaluate:
+        await _evaluate_if_needed(session, run)
+    if batch is None:
+        batch = await session.get(Batch, run.batch_id)
     if batch is None:
         raise HTTPException(status_code=500, detail="Reconciliation batch is missing")
     results: list[ReconciliationResultResponse] = []
@@ -109,7 +113,7 @@ async def _run_response(
         throughput=run.throughput,
         metrics=(
             run.metrics
-            if run.metrics is not None
+            if is_current_evaluation_report(run.metrics)
             else None
         ),
         error_message=run.error_message,
@@ -162,7 +166,10 @@ async def list_reconciliation_runs(
     page_size: int = Query(default=50, ge=1, le=200),
     session: AsyncSession = Depends(get_session),
 ) -> ReconciliationRunListResponse:
-    query = select(ReconciliationRun)
+    query = select(ReconciliationRun, Batch).join(
+        Batch,
+        Batch.id == ReconciliationRun.batch_id,
+    )
     count_query = select(func.count()).select_from(ReconciliationRun)
     if batch_id is not None:
         query = query.where(ReconciliationRun.batch_id == batch_id)
@@ -174,13 +181,25 @@ async def list_reconciliation_runs(
     offset = (page - 1) * page_size
     rows = (
         await session.execute(
-            query.order_by(ReconciliationRun.created_at.desc())
+            query.order_by(
+                ReconciliationRun.created_at.desc(),
+                ReconciliationRun.id.desc(),
+            )
             .offset(offset)
             .limit(page_size)
         )
-    ).scalars().all()
+    ).all()
     return ReconciliationRunListResponse(
-        items=[await _run_response(session, row, include_detail=False) for row in rows],
+        items=[
+            await _run_response(
+                session,
+                run,
+                include_detail=False,
+                batch=batch,
+                evaluate=False,
+            )
+            for run, batch in rows
+        ],
         total=total,
         page=page,
         page_size=page_size,
