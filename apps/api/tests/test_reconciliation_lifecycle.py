@@ -147,6 +147,34 @@ async def test_completed_runs_can_be_repeated_for_the_same_batch(monkeypatch):
 
 
 @pytest.mark.asyncio
+async def test_run_reconciliation_batches_result_persistence(monkeypatch):
+    session, batch = _session()
+    _patch_empty_run(monkeypatch, batch)
+    outcome = EngineOutcome(
+        status=ResultStatus.missing_razorpay,
+        stage=ReconciliationStage.ledger_to_razorpay,
+    )
+    monkeypatch.setattr(service, "reconcile_stage_a", MagicMock(return_value=[outcome]))
+
+    await service.run_reconciliation(session, batch.id, investigate=False)
+
+    assert session.flush.await_count == 2
+
+
+@pytest.mark.asyncio
+async def test_serverless_run_does_not_wait_for_advisory_investigation(monkeypatch):
+    session, batch = _session()
+    _patch_empty_run(monkeypatch, batch)
+    investigate = AsyncMock()
+    monkeypatch.setattr(service, "_investigate_after_commit", investigate)
+    monkeypatch.setattr(service.settings, "serverless", True)
+
+    await service.run_reconciliation(session, batch.id)
+
+    investigate.assert_not_awaited()
+
+
+@pytest.mark.asyncio
 async def test_failed_execution_persists_sanitized_failed_run(monkeypatch):
     session, batch = _session()
     _patch_empty_run(monkeypatch, batch)

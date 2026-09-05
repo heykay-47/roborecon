@@ -3,7 +3,7 @@ from datetime import datetime, timezone
 from enum import Enum
 from time import perf_counter_ns
 from typing import Any
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -19,6 +19,7 @@ from app.common.enums import (
     RunStatus,
 )
 from app.common.messages import MALFORMED_RECORD_MESSAGE
+from app.config import settings
 from app.database import async_session
 from app.demo.dataset import (
     BankCreditSeed,
@@ -254,6 +255,7 @@ def _outcome_result(
     currency: str | None,
 ) -> ReconciliationResult:
     return ReconciliationResult(
+        id=uuid4(),
         run_id=run.id,
         batch_id=batch_id,
         stage=outcome.stage,
@@ -386,6 +388,8 @@ async def _audit(
 async def run_reconciliation(
     session: AsyncSession,
     batch_id: UUID,
+    *,
+    investigate: bool = True,
 ) -> ReconciliationRun:
     """Run both pure deterministic stages against one fixed batch snapshot."""
     started_at = datetime.now(timezone.utc)
@@ -450,6 +454,7 @@ async def run_reconciliation(
             )
 
             ledger_rows = source_rows["ledger"]
+            pending_outcomes: list[tuple[ReconciliationResult, EngineOutcome]] = []
             for index, outcome in enumerate(stage_a_outcomes):
                 if index < len(ledger_rows):
                     primary = ledger_rows[index]
@@ -469,15 +474,7 @@ async def run_reconciliation(
                     currency=primary.currency if primary is not None else None,
                 )
                 session.add(result)
-                await session.flush()
-                _add_links_and_exception(
-                    session,
-                    run=run,
-                    result=result,
-                    outcome=outcome,
-                    source_index=source_index,
-                    batch_id=batch.id,
-                )
+                pending_outcomes.append((result, outcome))
 
             captured_payments = [
                 row
@@ -495,7 +492,11 @@ async def run_reconciliation(
                     currency=payment.currency,
                 )
                 session.add(result)
-                await session.flush()
+                pending_outcomes.append((result, outcome))
+
+            # Results must exist before their separately persisted links can be flushed.
+            await session.flush()
+            for result, outcome in pending_outcomes:
                 _add_links_and_exception(
                     session,
                     run=run,
@@ -547,7 +548,9 @@ async def run_reconciliation(
                 entity_id=run.id,
                 summary="Reconciliation run completed",
             )
-        await _investigate_after_commit(session, run)
+        # Serverless requests must return before external advisory provider I/O.
+        if investigate and not settings.serverless:
+            await _investigate_after_commit(session, run)
         return run
     except (RunAlreadyRunning, ValueError):
         await session.rollback()

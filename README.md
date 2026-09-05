@@ -53,6 +53,8 @@ Ledger + Razorpay + Settlement + Bank Credit
 
 The deterministic matcher handles normalization, candidate scoring, contradiction gates, thresholds, and autonomous resolution. AI receives only bounded persisted evidence. It cannot mutate records, create an autonomous Match Link, access hidden evaluation truth, or turn an outage into a success. Provider and AI failures return deterministic results for human review.
 
+Hosted serverless runs return after deterministic results are committed and do not wait for the optional AI investigation portfolio. Investigate individual Exceptions from the workspace after the run completes.
+
 All monetary values use integer INR paise. Ground Truth is stored separately for evaluation and is never read by matcher inputs, scoring, or evidence.
 
 ## Seeded benchmark
@@ -62,7 +64,7 @@ The deterministic demo uses seed `roborecon-v1`. It includes:
 - 120 merchant Ledger entries, plus provider-only and malformed records.
 - Exact identifiers, fee/GST arithmetic, date shifts, fuzzy references, duplicates, amount mismatches, missing Razorpay records, missing Settlements, missing Bank Credits, refunds, held and released amounts, and ambiguous candidates.
 - One hidden Evaluation Case for each scenario, with per-class results and exception recall.
-- Five exceptions selected across the investigation classes.
+- Five representative exception classes for optional investigation.
 
 ## Metrics
 

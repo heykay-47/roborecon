@@ -2,6 +2,7 @@
 .env
 .env.local
 .env.*.local
+.vercel/
 
 # Local planning and agent artifacts
 docs/
