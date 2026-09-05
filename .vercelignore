@@ -5,7 +5,6 @@
 .worktrees
 docs
 node_modules
-apps/web
 apps/api/.env*
 apps/api/.vercel
 **/__pycache__
